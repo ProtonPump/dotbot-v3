@@ -57,7 +57,8 @@ param(
     [string]$ProcessId,
     [switch]$NeedsInterview,
     [switch]$AutoWorkflow,
-    [switch]$NoWait
+    [switch]$NoWait,
+    [string]$FromPhase
 )
 
 # --- Configuration ---
@@ -481,6 +482,7 @@ $processData = @{
     error           = $null
     workflow        = $null
     description     = $Description
+    phases          = @()
 }
 
 Write-ProcessFile -Id $procId -Data $processData
@@ -2065,17 +2067,66 @@ elseif ($Type -eq 'kickstart') {
             )
         }
 
-        # ===== Phase 0: Interview (backward compat for profiles without interview-type phase) =====
+        # ===== Build phase tracking array from config =====
         $hasInterviewPhase = $kickstartPhases | Where-Object { $_.type -eq 'interview' }
         if ($NeedsInterview -and -not $hasInterviewPhase) {
-            $processData.heartbeat_status = "Phase 0: Interviewing for requirements"
-            Write-ProcessFile -Id $procId -Data $processData
-            Write-ProcessActivity -Id $procId -ActivityType "init" -Message "Phase 0 — interviewing for requirements..."
-            Write-Header "Phase 0: Interview"
+            # Prepend a synthetic interview phase for tracking
+            $processData.phases = @(@{
+                id = "interview"; name = "Interview"; type = "interview"
+                status = "pending"; started_at = $null; completed_at = $null; error = $null
+            })
+        } else {
+            $processData.phases = @()
+        }
+        # Append all config-driven phases
+        $processData.phases += @($kickstartPhases | ForEach-Object {
+            @{
+                id = $_.id; name = $_.name
+                type = if ($_.type) { $_.type } else { "llm" }
+                status = "pending"; started_at = $null; completed_at = $null; error = $null
+            }
+        })
+        Write-ProcessFile -Id $procId -Data $processData
 
-            Invoke-InterviewLoop -ProcessId $procId -ProcessData $processData `
-                -BotRoot $botRoot -ProductDir $productDir -UserPrompt $Prompt `
-                -ShowDebugJson:$ShowDebug -ShowVerboseOutput:$ShowVerbose
+        # ===== Validate FromPhase =====
+        $fromPhaseActive = $false
+        if ($FromPhase) {
+            $validPhaseIds = @($processData.phases | ForEach-Object { $_.id })
+            if ($FromPhase -notin $validPhaseIds) {
+                Write-Status "Unknown phase '$FromPhase' — running all phases" -Type Warn
+                $FromPhase = $null
+            } else {
+                $fromPhaseActive = $true
+            }
+        }
+
+        # ===== Phase 0: Interview (backward compat for profiles without interview-type phase) =====
+        if ($NeedsInterview -and -not $hasInterviewPhase) {
+            $interviewPhaseIdx = @($processData.phases | ForEach-Object { $_.id }).IndexOf('interview')
+
+            if ($fromPhaseActive -and $FromPhase -ne 'interview') {
+                $processData.phases[$interviewPhaseIdx].status = 'skipped'
+                $processData.phases[$interviewPhaseIdx].completed_at = 'prior-run'
+                Write-ProcessFile -Id $procId -Data $processData
+            } else {
+                if ($fromPhaseActive) { $fromPhaseActive = $false }
+                $processData.phases[$interviewPhaseIdx].status = 'running'
+                $processData.phases[$interviewPhaseIdx].started_at = (Get-Date).ToUniversalTime().ToString("o")
+                Write-ProcessFile -Id $procId -Data $processData
+
+                $processData.heartbeat_status = "Phase 0: Interviewing for requirements"
+                Write-ProcessFile -Id $procId -Data $processData
+                Write-ProcessActivity -Id $procId -ActivityType "init" -Message "Phase 0 — interviewing for requirements..."
+                Write-Header "Phase 0: Interview"
+
+                Invoke-InterviewLoop -ProcessId $procId -ProcessData $processData `
+                    -BotRoot $botRoot -ProductDir $productDir -UserPrompt $Prompt `
+                    -ShowDebugJson:$ShowDebug -ShowVerboseOutput:$ShowVerbose
+
+                $processData.phases[$interviewPhaseIdx].status = 'completed'
+                $processData.phases[$interviewPhaseIdx].completed_at = (Get-Date).ToUniversalTime().ToString("o")
+                Write-ProcessFile -Id $procId -Data $processData
+            }
         }
 
         # Build briefing context once (shared across LLM phases)
@@ -2106,12 +2157,31 @@ An interview-summary.md file exists in .bot/workspace/product/ containing the us
         $phaseNum = 1
         foreach ($phase in $kickstartPhases) {
             $phaseName = $phase.name
+            $trackIdx = @($processData.phases | ForEach-Object { $_.id }).IndexOf($phase.id)
+
+            # --- FromPhase skip logic ---
+            if ($fromPhaseActive -and $phase.id -ne $FromPhase) {
+                if ($trackIdx -ge 0) {
+                    $processData.phases[$trackIdx].status = 'skipped'
+                    $processData.phases[$trackIdx].completed_at = 'prior-run'
+                    Write-ProcessFile -Id $procId -Data $processData
+                }
+                Write-ProcessActivity -Id $procId -ActivityType "text" -Message "Skipping phase $phaseNum ($phaseName): before resume point"
+                Write-Status "Skipping phase $phaseNum ($phaseName) — before resume point" -Type Info
+                $phaseNum++; continue
+            }
+            if ($fromPhaseActive) { $fromPhaseActive = $false }
 
             # --- Condition check ---
             if ($phase.condition) {
                 if ($phase.condition -match '^file_exists:(.+)$') {
                     $checkPath = Join-Path $botRoot $matches[1]
                     if (-not (Test-Path $checkPath)) {
+                        if ($trackIdx -ge 0) {
+                            $processData.phases[$trackIdx].status = 'skipped'
+                            $processData.phases[$trackIdx].completed_at = (Get-Date).ToUniversalTime().ToString("o")
+                            Write-ProcessFile -Id $procId -Data $processData
+                        }
                         Write-ProcessActivity -Id $procId -ActivityType "text" -Message "Skipping phase $phaseNum ($phaseName): condition not met ($($phase.condition))"
                         Write-Status "Skipping phase $phaseNum ($phaseName) — condition not met" -Type Info
                         $phaseNum++; continue
@@ -2122,6 +2192,11 @@ An interview-summary.md file exists in .bot/workspace/product/ containing the us
             # Determine phase type
             $phaseType = if ($phase.type) { $phase.type } else { "llm" }
 
+            # Mark phase as running
+            if ($trackIdx -ge 0) {
+                $processData.phases[$trackIdx].status = 'running'
+                $processData.phases[$trackIdx].started_at = (Get-Date).ToUniversalTime().ToString("o")
+            }
             $processData.heartbeat_status = "Phase ${phaseNum}: $phaseName"
             Write-ProcessFile -Id $procId -Data $processData
             Write-ProcessActivity -Id $procId -ActivityType "init" -Message "Phase $phaseNum — $($phaseName.ToLower())..."
@@ -2130,6 +2205,11 @@ An interview-summary.md file exists in .bot/workspace/product/ containing the us
             if ($phaseType -eq "workflow") {
                 # --- Workflow phase: spawn child process to execute pending tasks ---
                 if (-not $AutoWorkflow) {
+                    if ($trackIdx -ge 0) {
+                        $processData.phases[$trackIdx].status = 'skipped'
+                        $processData.phases[$trackIdx].completed_at = (Get-Date).ToUniversalTime().ToString("o")
+                        Write-ProcessFile -Id $procId -Data $processData
+                    }
                     Write-ProcessActivity -Id $procId -ActivityType "text" -Message "Skipping workflow phase $phaseNum ($phaseName): auto-execute not enabled"
                     Write-Status "Skipping workflow phase (auto-execute not enabled)" -Type Info
                     $phaseNum++; continue
@@ -2209,6 +2289,11 @@ An interview-summary.md file exists in .bot/workspace/product/ containing the us
             } elseif ($phaseType -eq "interview") {
                 # --- Interview phase: run interview loop at this point in the pipeline ---
                 if (-not $NeedsInterview) {
+                    if ($trackIdx -ge 0) {
+                        $processData.phases[$trackIdx].status = 'skipped'
+                        $processData.phases[$trackIdx].completed_at = (Get-Date).ToUniversalTime().ToString("o")
+                        Write-ProcessFile -Id $procId -Data $processData
+                    }
                     Write-ProcessActivity -Id $procId -ActivityType "text" -Message "Skipping interview phase $phaseNum ($phaseName): not requested"
                     Write-Status "Skipping interview phase (not requested)" -Type Info
                     $phaseNum++; continue
@@ -2316,6 +2401,13 @@ IMPORTANT: If creating mission.md, it MUST begin with ## Executive Summary as th
                 }
             }
 
+            # Mark phase as completed
+            if ($trackIdx -ge 0) {
+                $processData.phases[$trackIdx].status = 'completed'
+                $processData.phases[$trackIdx].completed_at = (Get-Date).ToUniversalTime().ToString("o")
+                Write-ProcessFile -Id $procId -Data $processData
+            }
+
             Write-ProcessActivity -Id $procId -ActivityType "text" -Message "Phase $phaseNum complete — $($phaseName.ToLower())"
             $phaseNum++
         }
@@ -2325,6 +2417,11 @@ IMPORTANT: If creating mission.md, it MUST begin with ## Executive Summary as th
         $processData.completed_at = (Get-Date).ToUniversalTime().ToString("o")
         $processData.heartbeat_status = "Completed: $Description"
     } catch {
+        # Mark the current phase as failed if we have a tracking index
+        if ($trackIdx -ge 0 -and $processData.phases[$trackIdx].status -eq 'running') {
+            $processData.phases[$trackIdx].status = 'failed'
+            $processData.phases[$trackIdx].error = $_.Exception.Message
+        }
         $processData.status = 'failed'
         $processData.failed_at = (Get-Date).ToUniversalTime().ToString("o")
         $processData.error = $_.Exception.Message

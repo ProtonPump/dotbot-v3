@@ -841,3 +841,100 @@ function startRoadmapPolling() {
         }
     }, 5000);
 }
+
+/**
+ * Resume an incomplete kickstart from the next pending/failed phase
+ */
+async function resumeKickstart() {
+    try {
+        const response = await fetch(`${API_BASE}/api/product/kickstart/resume`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            kickstartInProgress = true;
+            kickstartProcessId = result.process_id || null;
+            showToast(`Kickstart resuming from "${result.resume_from}"...`, 'success', 8000);
+            startKickstartPolling();
+        } else {
+            showToast('Failed to resume: ' + (result.error || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        console.error('Error resuming kickstart:', error);
+        showToast('Error resuming kickstart: ' + error.message, 'error');
+    }
+}
+
+/**
+ * Render kickstart phases panel on the Overview tab
+ * Same visual pattern as the Workflow version but targets #overview-kickstart-phases
+ */
+function renderOverviewKickstartPhases(data) {
+    const container = document.getElementById('overview-kickstart-phases');
+    if (!container || !data || !data.phases || data.phases.length === 0) {
+        if (container) container.style.display = 'none';
+        return;
+    }
+
+    const completedCount = data.phases.filter(p => p.status === 'completed').length;
+    const totalCount = data.phases.length;
+
+    const statusIcons = {
+        completed: '<span class="phase-icon phase-completed">&#10003;</span>',
+        running:   '<span class="phase-icon phase-running">&#9679;</span>',
+        failed:    '<span class="phase-icon phase-failed">&#10007;</span>',
+        skipped:   '<span class="phase-icon phase-skipped">&#8211;</span>',
+        pending:   '<span class="phase-icon phase-pending">&#9675;</span>',
+        incomplete:'<span class="phase-icon phase-failed">&#9675;</span>'
+    };
+
+    // Check if already rendered and preserve collapsed state
+    const existing = container.querySelector('.kickstart-phases');
+    const wasCollapsed = existing ? existing.classList.contains('collapsed') : false;
+
+    let html = `
+        <div class="kickstart-phases${wasCollapsed ? ' collapsed' : ''}">
+            <div class="chain-layer-header" data-layer="overview-kickstart-phases">
+                <span class="chain-layer-title">Kickstart Phases</span>
+                <span class="chain-layer-count">${completedCount}/${totalCount}</span>
+            </div>
+            <div class="chain-layer-items">
+    `;
+
+    data.phases.forEach(phase => {
+        const icon = statusIcons[phase.status] || statusIcons.pending;
+        html += `
+            <div class="chain-layer-item kickstart-phase-item kickstart-phase-${phase.status}">
+                ${icon}
+                <span class="item-name">${escapeHtml(phase.name)}</span>
+            </div>
+        `;
+    });
+
+    if (data.status === 'incomplete' && data.resume_from) {
+        html += `
+            <div class="kickstart-resume-row">
+                <button class="kickstart-resume-btn" onclick="resumeKickstart()">RESUME</button>
+            </div>
+        `;
+    }
+
+    html += `
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = html;
+    container.style.display = 'block';
+
+    // Add collapse/expand handler
+    const header = container.querySelector('.kickstart-phases .chain-layer-header');
+    if (header) {
+        header.addEventListener('click', () => {
+            header.closest('.kickstart-phases').classList.toggle('collapsed');
+        });
+    }
+}

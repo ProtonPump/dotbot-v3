@@ -823,6 +823,31 @@ try {
                     break
                 }
 
+                "/api/kickstart/status" {
+                    $contentType = "application/json; charset=utf-8"
+                    $result = Get-KickstartStatus
+                    $content = $result | ConvertTo-Json -Depth 5 -Compress
+                    break
+                }
+
+                "/api/product/kickstart/resume" {
+                    if ($method -eq "POST") {
+                        $contentType = "application/json; charset=utf-8"
+                        try {
+                            $result = Resume-ProductKickstart
+                            if ($result._statusCode) { $statusCode = $result._statusCode; $result.Remove('_statusCode') }
+                            $content = $result | ConvertTo-Json -Compress
+                        } catch {
+                            $statusCode = 500
+                            $content = @{ success = $false; error = "Failed to resume kickstart: $($_.Exception.Message)" } | ConvertTo-Json -Compress
+                        }
+                    } else {
+                        $statusCode = 405
+                        $content = @{ success = $false; error = "Method not allowed" } | ConvertTo-Json -Compress
+                    }
+                    break
+                }
+
                 "/api/product/preflight" {
                     $contentType = "application/json; charset=utf-8"
                     $result = Get-PreflightResults
@@ -870,7 +895,7 @@ try {
                     break
                 }
 
-                { $_ -like "/api/product/*" -and $_ -ne "/api/product/list" -and $_ -ne "/api/product/preflight" -and $_ -ne "/api/product/analyse" } {
+                { $_ -like "/api/product/*" -and $_ -ne "/api/product/list" -and $_ -ne "/api/product/preflight" -and $_ -ne "/api/product/analyse" -and $_ -notlike "/api/product/kickstart*" } {
                     $contentType = "application/json; charset=utf-8"
                     $docName = $url -replace "^/api/product/", ""
                     $result = Get-ProductDocument -Name $docName

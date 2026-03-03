@@ -366,6 +366,275 @@ function Start-RoadmapPlanning {
     }
 }
 
+function Resolve-PhaseStatusFromOutputs {
+    param(
+        [Parameter(Mandatory)] [object]$Phase,
+        [Parameter(Mandatory)] [string]$BotRoot
+    )
+    $productDir = Join-Path $BotRoot "workspace\product"
+    $phaseType = if ($Phase.type) { $Phase.type } else { "llm" }
+
+    if ($phaseType -eq "interview") {
+        $interviewPath = Join-Path $productDir "interview-summary.md"
+        if (Test-Path $interviewPath) { return "completed" }
+        return "pending"
+    }
+
+    if ($phaseType -eq "workflow") {
+        # Check if tasks remain in active states
+        $activeDirs = @("todo", "analysing", "analysed", "in-progress")
+        $remaining = 0
+        foreach ($dir in $activeDirs) {
+            $dirPath = Join-Path $BotRoot "workspace\tasks\$dir"
+            if (Test-Path $dirPath) {
+                $remaining += @(Get-ChildItem $dirPath -Filter "*.json" -File -ErrorAction SilentlyContinue).Count
+            }
+        }
+        $donePath = Join-Path $BotRoot "workspace\tasks\done"
+        $doneCount = if (Test-Path $donePath) { @(Get-ChildItem $donePath -Filter "*.json" -File -ErrorAction SilentlyContinue).Count } else { 0 }
+        if ($doneCount -gt 0 -and $remaining -eq 0) { return "completed" }
+        if ($doneCount -gt 0 -or $remaining -gt 0) { return "incomplete" }
+        return "pending"
+    }
+
+    # LLM or script phases: check required_outputs
+    if ($Phase.required_outputs) {
+        $allExist = $true
+        foreach ($f in $Phase.required_outputs) {
+            if (-not (Test-Path (Join-Path $productDir $f))) { $allExist = $false; break }
+        }
+        if ($allExist) { return "completed" }
+        return "pending"
+    }
+
+    if ($Phase.required_outputs_dir) {
+        $dirPath = Join-Path $BotRoot "workspace\$($Phase.required_outputs_dir)"
+        $minCount = if ($Phase.min_output_count) { [int]$Phase.min_output_count } else { 1 }
+        $fileCount = if (Test-Path $dirPath) { @(Get-ChildItem $dirPath -Filter "*.json" -File).Count } else { 0 }
+        if ($fileCount -ge $minCount) { return "completed" }
+        # Tasks may have moved through the pipeline (todo → done)
+        if ($Phase.required_outputs_dir -match '^tasks/') {
+            $taskBaseDir = Join-Path $BotRoot "workspace\tasks"
+            $totalTasks = 0
+            foreach ($td in @("todo","analysing","analysed","in-progress","done","skipped","cancelled")) {
+                $tdPath = Join-Path $taskBaseDir $td
+                if (Test-Path $tdPath) {
+                    $totalTasks += @(Get-ChildItem $tdPath -Filter "*.json" -File -ErrorAction SilentlyContinue).Count
+                }
+            }
+            if ($totalTasks -ge $minCount) { return "completed" }
+        }
+        return "pending"
+    }
+
+    # No required_outputs defined — assume completed if phase script exists
+    if ($Phase.script) {
+        # Script-only phases: check commit_paths for evidence
+        if ($Phase.commit_paths) {
+            foreach ($cp in $Phase.commit_paths) {
+                $cpPath = Join-Path $BotRoot $cp
+                if ((Test-Path $cpPath) -and @(Get-ChildItem $cpPath -File -ErrorAction SilentlyContinue).Count -gt 0) {
+                    return "completed"
+                }
+            }
+        }
+    }
+
+    return "pending"
+}
+
+function Get-KickstartStatus {
+    $botRoot = $script:Config.BotRoot
+    $controlDir = $script:Config.ControlDir
+
+    # Read phase definitions from settings (source of truth)
+    $settingsFile = Join-Path $botRoot "defaults\settings.default.json"
+    $kickstartPhases = @()
+    if (Test-Path $settingsFile) {
+        try {
+            $settingsData = Get-Content $settingsFile -Raw | ConvertFrom-Json
+            if ($settingsData.kickstart -and $settingsData.kickstart.phases) {
+                $kickstartPhases = @($settingsData.kickstart.phases)
+            }
+        } catch {}
+    }
+
+    if ($kickstartPhases.Count -eq 0) {
+        return @{ status = "not-started"; process_id = $null; phases = @(); resume_from = $null }
+    }
+
+    # Find most recent kickstart process
+    $processesDir = Join-Path $controlDir "processes"
+    $latestProc = $null
+    if (Test-Path $processesDir) {
+        $procFiles = Get-ChildItem -Path $processesDir -Filter "*.json" -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending
+        foreach ($pf in $procFiles) {
+            try {
+                $pData = Get-Content $pf.FullName -Raw | ConvertFrom-Json
+                if ($pData.type -eq 'kickstart') {
+                    $latestProc = $pData
+                    break
+                }
+            } catch {}
+        }
+    }
+
+    if (-not $latestProc) {
+        # No process found — infer from filesystem
+        $phases = @($kickstartPhases | ForEach-Object {
+            $inferredStatus = Resolve-PhaseStatusFromOutputs -Phase $_ -BotRoot $botRoot
+            @{
+                id = $_.id; name = $_.name
+                type = if ($_.type) { $_.type } else { "llm" }
+                status = $inferredStatus
+            }
+        })
+        # Sequential consistency: if a later phase completed, earlier ones must have too
+        $lastCompletedIdx = -1
+        for ($i = 0; $i -lt $phases.Count; $i++) {
+            if ($phases[$i].status -eq 'completed') { $lastCompletedIdx = $i }
+        }
+        for ($i = 0; $i -lt $lastCompletedIdx; $i++) {
+            if ($phases[$i].status -in @('pending', 'incomplete')) {
+                $phases[$i].status = 'completed'
+            }
+        }
+
+        $completedCount = @($phases | Where-Object { $_.status -eq 'completed' }).Count
+        $overallStatus = if ($completedCount -eq 0) { "not-started" }
+                         elseif ($completedCount -eq $phases.Count) { "completed" }
+                         else { "incomplete" }
+        $resumeFrom = ($phases | Where-Object { $_.status -in @('pending', 'failed', 'incomplete') } | Select-Object -First 1).id
+
+        return @{
+            status = $overallStatus
+            process_id = $null
+            phases = $phases
+            resume_from = $resumeFrom
+        }
+    }
+
+    # Process found — use its phases array if available
+    if ($latestProc.phases -and $latestProc.phases.Count -gt 0) {
+        $phases = @($latestProc.phases | ForEach-Object {
+            @{ id = $_.id; name = $_.name; type = $_.type; status = $_.status }
+        })
+    } else {
+        # Legacy process without phases — infer from outputs
+        $phases = @($kickstartPhases | ForEach-Object {
+            $inferredStatus = Resolve-PhaseStatusFromOutputs -Phase $_ -BotRoot $botRoot
+            @{
+                id = $_.id; name = $_.name
+                type = if ($_.type) { $_.type } else { "llm" }
+                status = $inferredStatus
+            }
+        })
+    }
+
+    # Sequential consistency: if a later phase completed, earlier ones must have too
+    $lastCompletedIdx = -1
+    for ($i = 0; $i -lt $phases.Count; $i++) {
+        if ($phases[$i].status -eq 'completed') { $lastCompletedIdx = $i }
+    }
+    for ($i = 0; $i -lt $lastCompletedIdx; $i++) {
+        if ($phases[$i].status -in @('pending', 'incomplete')) {
+            $phases[$i].status = 'completed'
+        }
+    }
+
+    # Compute overall status
+    $completedCount = @($phases | Where-Object { $_.status -eq 'completed' }).Count
+    $skippedCount = @($phases | Where-Object { $_.status -eq 'skipped' }).Count
+    $runningCount = @($phases | Where-Object { $_.status -eq 'running' }).Count
+    $failedCount = @($phases | Where-Object { $_.status -eq 'failed' }).Count
+
+    $overallStatus = if ($runningCount -gt 0) { "running" }
+                     elseif ($latestProc.status -eq 'running') { "running" }
+                     elseif (($completedCount + $skippedCount) -eq $phases.Count) { "completed" }
+                     elseif ($failedCount -gt 0 -or $completedCount -gt 0) { "incomplete" }
+                     else { "not-started" }
+
+    $resumeFrom = ($phases | Where-Object { $_.status -in @('pending', 'failed', 'incomplete') } | Select-Object -First 1).id
+
+    return @{
+        status = $overallStatus
+        process_id = $latestProc.id
+        phases = $phases
+        resume_from = $resumeFrom
+    }
+}
+
+function Resume-ProductKickstart {
+    $botRoot = $script:Config.BotRoot
+
+    # Get current status
+    $status = Get-KickstartStatus
+    if ($status.status -eq 'completed') {
+        return @{ _statusCode = 400; success = $false; error = "Kickstart already completed — nothing to resume" }
+    }
+    if ($status.status -eq 'running') {
+        return @{ _statusCode = 400; success = $false; error = "Kickstart is currently running" }
+    }
+    if (-not $status.resume_from) {
+        return @{ _statusCode = 400; success = $false; error = "No phase to resume from" }
+    }
+
+    # Read original prompt (fall back to mission.md if prompt file is missing)
+    $launchersDir = Join-Path $script:Config.ControlDir "launchers"
+    if (-not (Test-Path $launchersDir)) {
+        New-Item -Path $launchersDir -ItemType Directory -Force | Out-Null
+    }
+    $promptFile = Join-Path $launchersDir "kickstart-prompt.txt"
+    if (-not (Test-Path $promptFile)) {
+        $missionFile = Join-Path $botRoot "workspace\product\mission.md"
+        if (Test-Path $missionFile) {
+            $missionContent = Get-Content -LiteralPath $missionFile -Raw
+            $missionContent | Set-Content -Path $promptFile -Encoding UTF8 -NoNewline
+        } else {
+            return @{ _statusCode = 400; success = $false; error = "Cannot resume — no saved prompt or mission document found. Please start a new kickstart." }
+        }
+    }
+    $originalPrompt = Get-Content -LiteralPath $promptFile -Raw
+
+    # Launch resumed kickstart
+    $launcherPath = Join-Path $botRoot "systems\runtime\launch-process.ps1"
+    $resumePhase = $status.resume_from
+
+    $wrapperPath = Join-Path $launchersDir "kickstart-resume-launcher.ps1"
+    @"
+`$prompt = Get-Content -LiteralPath '$promptFile' -Raw
+& '$launcherPath' -Type kickstart -Prompt `$prompt -Description 'Kickstart: resume from $resumePhase' -AutoWorkflow -FromPhase '$resumePhase'
+"@ | Set-Content -Path $wrapperPath -Encoding UTF8
+
+    $proc = Start-Process pwsh -ArgumentList "-NoProfile", "-File", $wrapperPath -WindowStyle Normal -PassThru
+
+    # Find process_id by PID
+    Start-Sleep -Milliseconds 500
+    $processesDir = Join-Path $script:Config.ControlDir "processes"
+    $launchedProcId = $null
+    $procFiles = Get-ChildItem -Path $processesDir -Filter "*.json" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    foreach ($pf in $procFiles) {
+        try {
+            $pData = Get-Content $pf.FullName -Raw | ConvertFrom-Json
+            if ($pData.pid -eq $proc.Id) {
+                $launchedProcId = $pData.id
+                break
+            }
+        } catch {}
+    }
+
+    Write-Status "Kickstart resumed from phase '$resumePhase' (PID: $($proc.Id))" -Type Info
+
+    return @{
+        success = $true
+        process_id = $launchedProcId
+        resume_from = $resumePhase
+        message = "Kickstart resumed from phase '$resumePhase'"
+    }
+}
+
 Export-ModuleMember -Function @(
     'Initialize-ProductAPI',
     'Get-ProductList',
@@ -373,5 +642,7 @@ Export-ModuleMember -Function @(
     'Get-PreflightResults',
     'Start-ProductKickstart',
     'Start-ProductAnalyse',
-    'Start-RoadmapPlanning'
+    'Start-RoadmapPlanning',
+    'Get-KickstartStatus',
+    'Resume-ProductKickstart'
 )
