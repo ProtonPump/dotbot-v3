@@ -1142,7 +1142,7 @@ elseif ($Type -eq 'workflow') {
 
             # Use analysis model from settings
             $analysisModel = if ($settings.analysis?.model) { $settings.analysis.model } else { 'Opus' }
-            $analysisModelName = $modelMap[$analysisModel]
+            $analysisModelName = Resolve-ProviderModelId -ModelAlias $analysisModel
 
             $fullAnalysisPrompt = @"
 $analysisPrompt
@@ -1322,7 +1322,7 @@ Do NOT implement the task. Your job is research and preparation only.
 
             # Use execution model from settings
             $executionModel = if ($settings.execution?.model) { $settings.execution.model } else { 'Opus' }
-            $executionModelName = $modelMap[$executionModel]
+            $executionModelName = Resolve-ProviderModelId -ModelAlias $executionModel
 
             # Build execution prompt
             $executionPrompt = Build-TaskPrompt `
@@ -1636,7 +1636,7 @@ elseif ($Type -eq 'kickstart') {
             $summaryPath = Join-Path $productDir "interview-summary.md"
 
             # Use Opus for interview quality
-            $interviewModel = $modelMap['Opus']
+            $interviewModel = Resolve-ProviderModelId -ModelAlias 'Opus'
 
             do {
                 $interviewRound++
