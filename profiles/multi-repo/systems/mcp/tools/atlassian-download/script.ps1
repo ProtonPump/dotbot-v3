@@ -22,6 +22,19 @@ function Invoke-AtlassianDownload {
     $apiToken = $env:ATLASSIAN_API_TOKEN
     $cloudId  = $env:ATLASSIAN_CLOUD_ID
 
+    # Auto-resolve site URL to Cloud ID UUID
+    if ($cloudId -and $cloudId -match '\.atlassian\.net') {
+        $siteUrl = ($cloudId -replace '/+$', '')
+        if ($siteUrl -notmatch '^https?://') { $siteUrl = "https://$siteUrl" }
+        try {
+            $tenantInfo = Invoke-RestMethod -Uri "$siteUrl/_edge/tenant_info" -ErrorAction Stop
+            $cloudId = $tenantInfo.cloudId
+            $env:ATLASSIAN_CLOUD_ID = $cloudId   # cache for subsequent calls
+        } catch {
+            throw "ATLASSIAN_CLOUD_ID looks like a site URL but could not resolve via _edge/tenant_info: $_`nSet ATLASSIAN_CLOUD_ID to the UUID directly (find it at $siteUrl/_edge/tenant_info)"
+        }
+    }
+
     if (-not $email)    { throw "ATLASSIAN_EMAIL not set in .env.local" }
     if (-not $apiToken) { throw "ATLASSIAN_API_TOKEN not set in .env.local" }
     if (-not $cloudId)  { throw "ATLASSIAN_CLOUD_ID not set in .env.local" }
@@ -76,7 +89,19 @@ function Invoke-AtlassianDownload {
                 original_name = $FileName
                 source        = $Source
                 size          = $fileInfo.Length
-                content_type  = [System.Web.MimeMapping]::GetMimeMapping($destPath) 2>$null
+                content_type  = switch -Wildcard ([System.IO.Path]::GetExtension($destPath).ToLower()) {
+                    '.pdf'  { 'application/pdf' }   '.png'  { 'image/png' }
+                    '.jpg'  { 'image/jpeg' }        '.jpeg' { 'image/jpeg' }
+                    '.gif'  { 'image/gif' }         '.svg'  { 'image/svg+xml' }
+                    '.doc'  { 'application/msword' } '.docx' { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+                    '.xls'  { 'application/vnd.ms-excel' } '.xlsx' { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
+                    '.ppt'  { 'application/vnd.ms-powerpoint' } '.pptx' { 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }
+                    '.msg'  { 'application/vnd.ms-outlook' }
+                    '.zip'  { 'application/zip' }   '.json' { 'application/json' }
+                    '.txt'  { 'text/plain' }        '.csv'  { 'text/csv' }
+                    '.html' { 'text/html' }         '.md'   { 'text/markdown' }
+                    default { 'application/octet-stream' }
+                }
                 issue_key     = $IssueKey
             }
         } catch {
@@ -109,9 +134,11 @@ function Invoke-AtlassianDownload {
     # ---------------------------------------------------------------------------
     try {
         $jql = [System.Uri]::EscapeDataString("parent = $jiraKey")
-        $childResp = Invoke-RestMethod `
-            -Uri "$baseUrl/search?jql=$jql&fields=key,summary,attachment&maxResults=50" `
-            -Headers $headers -ErrorAction Stop
+        $childResp = Invoke-RestMethod -Method Post `
+            -Uri "$baseUrl/search/jql" `
+            -Headers ($headers + @{ "Content-Type" = "application/json" }) `
+            -Body (@{ jql = "parent = $jiraKey"; fields = @("key","summary","attachment"); maxResults = 50 } | ConvertTo-Json) `
+            -ErrorAction Stop
 
         foreach ($child in $childResp.issues) {
             if ($child.fields.attachment) {

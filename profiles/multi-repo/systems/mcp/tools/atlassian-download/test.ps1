@@ -83,6 +83,81 @@ if ($dirCreated) {
     Write-Host "   FAIL: Custom target_dir was not created" -ForegroundColor Red
 }
 
+# Test 4: URL-format ATLASSIAN_CLOUD_ID is resolved to UUID
+Write-Host "`n4. URL-format ATLASSIAN_CLOUD_ID resolves to UUID"
+$env:ATLASSIAN_EMAIL = "test@example.com"
+$env:ATLASSIAN_API_TOKEN = "fake-token"
+$env:ATLASSIAN_CLOUD_ID = "https://mysite.atlassian.net"
+
+try {
+    Invoke-AtlassianDownload -Arguments @{ jira_key = "TEST-456" }
+} catch {
+    # API calls will fail with fake token — that's fine
+}
+
+$resolvedId = $env:ATLASSIAN_CLOUD_ID
+$env:ATLASSIAN_EMAIL = $savedEmail
+$env:ATLASSIAN_API_TOKEN = $savedToken
+$env:ATLASSIAN_CLOUD_ID = $savedCloud
+
+if ($resolvedId -and $resolvedId -notmatch '\.atlassian\.net' -and $resolvedId -match '^[0-9a-f\-]{36}$') {
+    Write-Host "   PASS: URL resolved to UUID ($resolvedId)" -ForegroundColor Green
+} else {
+    Write-Host "   FAIL: Expected UUID, got: $resolvedId" -ForegroundColor Red
+}
+
+# Test 5: Bare domain (no https://) also resolves to UUID
+Write-Host "`n5. Bare domain resolves to UUID"
+$env:ATLASSIAN_EMAIL = "test@example.com"
+$env:ATLASSIAN_API_TOKEN = "fake-token"
+$env:ATLASSIAN_CLOUD_ID = "mysite.atlassian.net"
+
+try {
+    Invoke-AtlassianDownload -Arguments @{ jira_key = "TEST-789" }
+} catch {
+    # API calls will fail with fake token — that's fine
+}
+
+$resolvedIdBare = $env:ATLASSIAN_CLOUD_ID
+$env:ATLASSIAN_EMAIL = $savedEmail
+$env:ATLASSIAN_API_TOKEN = $savedToken
+$env:ATLASSIAN_CLOUD_ID = $savedCloud
+
+if ($resolvedIdBare -and $resolvedIdBare -notmatch '\.atlassian\.net' -and $resolvedIdBare -match '^[0-9a-f\-]{36}$') {
+    Write-Host "   PASS: Bare domain resolved to UUID ($resolvedIdBare)" -ForegroundColor Green
+} else {
+    Write-Host "   FAIL: Expected UUID, got: $resolvedIdBare" -ForegroundColor Red
+}
+
+# Test 6: Invalid URL gives helpful error mentioning _edge/tenant_info
+Write-Host "`n6. Invalid URL gives helpful error"
+$env:ATLASSIAN_EMAIL = "test@example.com"
+$env:ATLASSIAN_API_TOKEN = "fake-token"
+$env:ATLASSIAN_CLOUD_ID = "https://this-does-not-exist-99999.atlassian.net"
+
+$threwResolution = $false
+$mentionsTenantInfo = $false
+try {
+    Invoke-AtlassianDownload -Arguments @{ jira_key = "TEST-000" }
+} catch {
+    $threwResolution = $true
+    if ($_.Exception.Message -like "*_edge/tenant_info*") {
+        $mentionsTenantInfo = $true
+    }
+}
+
+$env:ATLASSIAN_EMAIL = $savedEmail
+$env:ATLASSIAN_API_TOKEN = $savedToken
+$env:ATLASSIAN_CLOUD_ID = $savedCloud
+
+if ($threwResolution -and $mentionsTenantInfo) {
+    Write-Host "   PASS: Helpful error with _edge/tenant_info reference" -ForegroundColor Green
+} elseif ($threwResolution) {
+    Write-Host "   WARN: Threw error but did not mention _edge/tenant_info" -ForegroundColor Yellow
+} else {
+    Write-Host "   SKIP: Domain resolved unexpectedly (network-dependent test)" -ForegroundColor Yellow
+}
+
 # Cleanup
 if (Test-Path $testRoot) {
     Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -81,7 +81,7 @@
         "name": "Atlassian Cloud ID",
         "var": "ATLASSIAN_CLOUD_ID",
         "message": "Atlassian Cloud ID is required for downloading Jira/Confluence attachments",
-        "hint": "Set ATLASSIAN_CLOUD_ID in .env.local"
+        "hint": "Set ATLASSIAN_CLOUD_ID in .env.local (UUID or site URL like https://yoursite.atlassian.net)"
       },
       {
         "type": "mcp_server",
