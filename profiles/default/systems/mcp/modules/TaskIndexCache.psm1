@@ -394,6 +394,68 @@ function Get-NextAnalysedTask {
     }
 }
 
+function Get-DeadlockedTasks {
+    <#
+    .SYNOPSIS
+    Returns info about todo tasks that are blocked by at least one skipped dependency.
+
+    .DESCRIPTION
+    Called when Get-NextTask returns null to distinguish a dependency deadlock from a
+    genuine wait (e.g. analysis still running). Returns a hashtable with the count of
+    blocked tasks and the names of the skipped tasks that are actually blocking them.
+    #>
+
+    $index = Get-TaskIndex
+    if ($index.Todo.Count   -eq 0) { return @{ Count = 0; BlockerNames = @() } }
+    if ($index.Skipped.Count -eq 0) { return @{ Count = 0; BlockerNames = @() } }
+
+    # Build a case-insensitive lookup set covering id, name, and slug of every
+    # skipped task so dependency strings can be matched in one Contains() call.
+    $skippedLookup = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    # Map from any form (id/name/slug) back to the task name for reporting.
+    $skippedNameMap = @{}
+    foreach ($t in $index.Skipped.Values) {
+        $skippedLookup.Add($t.id)   | Out-Null
+        $skippedLookup.Add($t.name) | Out-Null
+        $slug = ($t.name -replace '[^a-zA-Z0-9\s-]', '' -replace '\s+', '-').ToLower()
+        $skippedLookup.Add($slug)   | Out-Null
+        $skippedNameMap[$t.id]   = $t.name
+        $skippedNameMap[$t.name] = $t.name
+        $skippedNameMap[$slug]   = $t.name
+    }
+
+    $count = 0
+    $blockerNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($task in $index.Todo.Values) {
+        $deps = if     ($task.dependencies -is [array]) { @($task.dependencies) }
+                elseif ($task.dependencies)              { @($task.dependencies) }
+                else                                     { @() }
+
+        foreach ($dep in $deps) {
+            if (-not $dep) { continue }
+
+            # If the dependency is already satisfied by a done/split task, skip it.
+            if (Test-DependencyMet -Dependency $dep `
+                    -DoneNames $index.DoneNames `
+                    -DoneSlugs $index.DoneSlugs `
+                    -DoneIds   $index.DoneIds) { continue }
+
+            # The dependency is unmet — is the blocker a skipped task?
+            if ($skippedLookup.Contains($dep)) {
+                $count++
+                $blockerNames.Add($skippedNameMap[$dep]) | Out-Null
+                break  # count each blocked task only once
+            }
+        }
+    }
+
+    return @{ Count = $count; BlockerNames = @($blockerNames | Sort-Object) }
+}
+
 function Test-TaskDone {
     param(
         [Parameter(Mandatory = $true)]

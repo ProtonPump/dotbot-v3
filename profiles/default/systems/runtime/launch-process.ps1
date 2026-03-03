@@ -578,6 +578,17 @@ if ($Type -in @('analysis', 'execution')) {
                             $taskResult = Invoke-TaskGetNext -Arguments @{ verbose = $true }
                         }
                         if ($taskResult.task) { $foundTask = $true; break }
+
+                        # Deadlock detection: if todo tasks exist but all are blocked by
+                        # skipped prerequisites, polling forever gains nothing.
+                        $deadlock = Get-DeadlockedTasks
+                        if ($deadlock.Count -gt 0) {
+                            $blockers    = $deadlock.BlockerNames -join ', '
+                            $deadlockMsg = "Dependency deadlock: $($deadlock.Count) todo task(s) are blocked by skipped prerequisite(s) [$blockers]. Workflow cannot continue automatically — reset or re-implement the skipped tasks to unblock the queue."
+                            Write-Status $deadlockMsg -Type Error
+                            Write-ProcessActivity -Id $procId -ActivityType "text" -Message $deadlockMsg
+                            break
+                        }
                     }
                     if (-not $foundTask) { break }
                 } else {
@@ -1085,6 +1096,18 @@ elseif ($Type -eq 'workflow') {
                         Reset-TaskIndex
                         $taskResult = Get-NextTodoTask -Verbose
                         if ($taskResult.task) { $foundTask = $true; break }
+
+                        # Deadlock detection: if todo tasks exist but all are blocked by
+                        # skipped prerequisites, polling forever gains nothing. Exit with
+                        # a diagnostic instead of waiting indefinitely.
+                        $deadlock = Get-DeadlockedTasks
+                        if ($deadlock.Count -gt 0) {
+                            $blockers    = $deadlock.BlockerNames -join ', '
+                            $deadlockMsg = "Dependency deadlock: $($deadlock.Count) todo task(s) are blocked by skipped prerequisite(s) [$blockers]. Workflow cannot continue automatically — reset or re-implement the skipped tasks to unblock the queue."
+                            Write-Status $deadlockMsg -Type Error
+                            Write-ProcessActivity -Id $procId -ActivityType "text" -Message $deadlockMsg
+                            break
+                        }
                     }
                     if (-not $foundTask) { break }
                 } else {
