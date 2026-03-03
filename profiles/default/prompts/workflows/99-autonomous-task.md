@@ -98,6 +98,7 @@ You are working in a **git worktree** on branch `{{BRANCH_NAME}}`.
    - Commit after each logical unit of work
    - Use conventional commit messages
    - Include task ID: `[task:XXXXXXXX]` (first 8 chars of {{TASK_ID}})
+   - **Commit ALL modified files** — including `package.json`, `package-lock.json`, lock files, and any config files updated by dependency installs. The `01-git-clean.ps1` verification will fail if any non-`.bot/` file is left uncommitted when you call `task_mark_done`.
    - Example:
      ```
      Add CalendarEvent entity with EF Core configuration
@@ -116,9 +117,15 @@ You are working in a **git worktree** on branch `{{BRANCH_NAME}}`.
    pwsh -ExecutionPolicy Bypass -File ".bot/hooks/verify/01-git-clean.ps1" 2>&1
    ```
 
+   Before running `01-git-clean.ps1`, confirm your working tree is fully clean:
+   ```bash
+   git status --porcelain
+   ```
+   There must be **zero** uncommitted non-`.bot/` files. If you ran `npm install`, `pip install`, or any other package manager, make sure the resulting lock files and manifest changes are staged and committed.
+
 3. **Handle failures:**
    - Privacy scan: Fix ALL violations (use repo-relative paths, never absolute paths)
-   - Git clean: Fix implementation files, ignore `.bot/workspace/tasks/`
+   - Git clean: Stage and commit ALL modified non-`.bot/` files (ignore `.bot/workspace/tasks/`). Check for package manager output files specifically (`package.json`, lock files, etc.).
    - Build/format: Always fix before proceeding
 
 ### Phase 4: Completion
