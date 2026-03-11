@@ -594,6 +594,10 @@ function Invoke-ClaudeStream {
             }
         } catch {
             # Ignore errors from reading stderr after process exit
+            if ($ShowDebugJson) {
+                [Console]::Error.WriteLine("$($t.Bezel)[DEBUG] stderr drain error: $($_.Exception.Message)$($t.Reset)")
+                [Console]::Error.Flush()
+            }
         }
     })
 
@@ -1071,6 +1075,13 @@ function Invoke-ClaudeStream {
     } finally {
         # Restore original output encoding
         [Console]::OutputEncoding = $prevOutputEncoding
+
+        # Wait for the stderr drain task to finish before disposing the process,
+        # otherwise the task may still be reading from StandardError when the
+        # process handle is closed, causing an unobserved exception.
+        if ($stderrDrain) {
+            try { $stderrDrain.Wait(3000) } catch {}
+        }
 
         # Ensure process is disposed
         if ($claudeProc -and -not $claudeProc.HasExited) {
