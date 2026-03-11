@@ -1079,8 +1079,15 @@ function Invoke-ClaudeStream {
         # Wait for the stderr drain task to finish before disposing the process,
         # otherwise the task may still be reading from StandardError when the
         # process handle is closed, causing an unobserved exception.
+        # The 3-second timeout is generous — once the process exits, ReadLine()
+        # returns null almost immediately, so this is just a safety net.
         if ($stderrDrain) {
-            try { $stderrDrain.Wait(3000) } catch {}
+            try { $stderrDrain.Wait(3000) } catch {
+                if ($ShowDebugJson) {
+                    [Console]::Error.WriteLine("$($t.Bezel)[DEBUG] stderr drain wait error: $($_.Exception.Message)$($t.Reset)")
+                    [Console]::Error.Flush()
+                }
+            }
         }
 
         # Ensure process is disposed
