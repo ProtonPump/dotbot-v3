@@ -467,6 +467,24 @@
         10,
         12
       ]
+    },
+    "authority": {
+      "name": "Authority Partners",
+      "primary": [193, 216, 47],
+      "primary-dim": [159, 166, 23],
+      "secondary": [51, 156, 204],
+      "tertiary": [175, 184, 191],
+      "success": [193, 216, 47],
+      "success-dim": [159, 166, 23],
+      "error": [209, 105, 105],
+      "warning": [228, 231, 109],
+      "info": [51, 156, 204],
+      "muted": [105, 106, 109],
+      "bezel": [46, 56, 62],
+      "bg-deep": [5, 6, 4],
+      "bg-panel": [10, 12, 8],
+      "bg-module": [13, 16, 10],
+      "bg-screen": [7, 9, 5]
     }
   }
 }
