@@ -55,6 +55,13 @@
       "primary-dim": [170, 170, 180],
       "success": [0, 255, 136],
       "success-dim": [0, 170, 92]
+    },
+    "authority": {
+      "name": "Authority Partners",
+      "primary": [193, 216, 47],
+      "primary-dim": [159, 166, 23],
+      "success": [193, 216, 47],
+      "success-dim": [159, 166, 23]
     }
   }
 }
