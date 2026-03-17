@@ -1,0 +1,104 @@
+{
+  "instance_id": null,
+  "profile": "kickstart-via-proposal",
+  "provider": "claude",
+  "mcp_enabled": true,
+  "standards_as_warp_rules": true,
+  "analysis": {
+    "auto_approve_splits": false,
+    "split_threshold_effort": "XL",
+    "question_timeout_hours": null,
+    "mode": "on-demand",
+    "model": "Opus"
+  },
+  "execution": {
+    "model": "Opus"
+  },
+  "editor": {
+    "name": "off",
+    "custom_command": ""
+  },
+  "task_categories": ["core", "feature", "enhancement", "bugfix", "infrastructure", "ui-ux", "integration"],
+  "costs": {
+    "hourly_rate": 50,
+    "ai_cost_per_task": 0.50,
+    "ai_speedup_factor": 10,
+    "currency": "USD"
+  },
+  "mothership": {
+    "enabled": false,
+    "server_url": "",
+    "api_key": "",
+    "channel": "teams",
+    "recipients": [],
+    "project_name": "",
+    "project_description": "",
+    "poll_interval_seconds": 30,
+    "sync_tasks": true,
+    "sync_questions": true
+  },
+  "kickstart": {
+    "dialog": {
+      "description": "Point dotbot to an Authority Partners AI-Native project proposal repository. Dotbot will import decisions, synthesize product documents, and create implementation tasks from the proposal backlog.",
+      "interview_label": "Resolve open decisions before task creation",
+      "interview_hint": "Dotbot will present unresolved ADRs (Open, Proposed, Conflict) as interview questions before creating tasks",
+      "prompt_placeholder": "Enter the full path to the project proposal repository"
+    },
+    "preflight": [],
+    "phases": [
+      {
+        "id": "import-decisions",
+        "name": "Import Decisions from ADRs",
+        "script": "import-proposal-decisions.ps1",
+        "commit_paths": ["workspace/decisions/", "workspace/product/"],
+        "commit_message": "chore(kickstart): phase 0a — imported decisions from proposal ADRs"
+      },
+      {
+        "id": "synthesize-docs",
+        "name": "Synthesize Product Documents",
+        "workflow": "01-synthesize-product-docs.md",
+        "required_outputs": ["mission.md", "tech-stack.md", "entity-model.md"],
+        "front_matter_docs": ["mission.md", "tech-stack.md", "entity-model.md"],
+        "commit_paths": ["workspace/product/"],
+        "commit_message": "chore(kickstart): phase 0b — product documents synthesized from proposal"
+      },
+      {
+        "id": "resolve-adrs",
+        "name": "Resolve Open Decisions",
+        "type": "interview",
+        "optional": true,
+        "commit_paths": ["workspace/decisions/"],
+        "commit_message": "chore(kickstart): phase 0c — open decisions resolved"
+      },
+      {
+        "id": "plan-groups",
+        "name": "Plan Task Groups",
+        "workflow": "03a-plan-task-groups.md",
+        "required_outputs": ["task-groups.json"],
+        "commit_paths": ["workspace/product/"],
+        "commit_message": "chore(kickstart): phase 1 — task groups planned"
+      },
+      {
+        "id": "create-tasks",
+        "name": "Create Tasks from Features",
+        "script": "expand-proposal-features.ps1",
+        "commit_paths": ["workspace/tasks/"],
+        "commit_message": "chore(kickstart): phase 2 — tasks created from proposal features"
+      },
+      {
+        "id": "resolve-intra-deps",
+        "name": "Resolve Intra-Group Dependencies",
+        "script": "resolve-intra-group-deps.ps1",
+        "commit_paths": ["workspace/tasks/"],
+        "commit_message": "chore(kickstart): phase 3a — intra-group dependencies resolved"
+      },
+      {
+        "id": "resolve-inter-deps",
+        "name": "Resolve Inter-Group Dependencies",
+        "workflow": "04-resolve-inter-group-deps.md",
+        "commit_paths": ["workspace/tasks/"],
+        "commit_message": "chore(kickstart): phase 3b — inter-group dependencies resolved"
+      }
+    ]
+  }
+}

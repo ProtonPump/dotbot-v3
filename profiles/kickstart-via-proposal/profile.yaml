@@ -1,0 +1,3 @@
+type: workflow
+name: kickstart-via-proposal
+description: Import Authority Partners AI-Native project proposals — converts ADRs to decisions, synthesizes product docs, and creates implementation tasks from proposal backlog
