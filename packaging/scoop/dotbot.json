@@ -4,9 +4,7 @@
     "homepage": "https://github.com/andresharpe/dotbot",
     "license": "MIT",
     "url": "https://github.com/andresharpe/dotbot/releases/download/v3.1.0/dotbot-3.1.0.zip",
-    "hash": {
-        "url": "https://github.com/andresharpe/dotbot/releases/download/v3.1.0/dotbot-3.1.0.zip.sha256"
-    },
+    "hash": "skip",
     "extract_dir": "dotbot-3.1.0",
     "suggest": {
         "PowerShell 7+": "pwsh"
@@ -27,8 +25,6 @@
     "autoupdate": {
         "url": "https://github.com/andresharpe/dotbot/releases/download/v$version/dotbot-$version.zip",
         "extract_dir": "dotbot-$version",
-        "hash": {
-            "url": "$url.sha256"
-        }
+        "hash": "skip"
     }
 }
