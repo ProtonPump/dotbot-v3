@@ -93,7 +93,7 @@ $archivePath = Join-Path $tempDir $archiveAsset.name
 Write-Host "  Downloading v$version..." -ForegroundColor Cyan
 
 try {
-    Invoke-WebRequest -Uri $archiveAsset.browser_download_url -OutFile $archivePath -UseBasicParsing
+    Invoke-WebRequest -Uri $archiveAsset.browser_download_url -OutFile $archivePath
 
     # Extract archive
     Write-Host "  Extracting..." -ForegroundColor Cyan
