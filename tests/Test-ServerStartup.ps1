@@ -26,7 +26,7 @@ Write-Host ""
 Reset-TestResults
 
 # Check prerequisite: dotbot must be installed
-$dotbotInstalled = Test-Path (Join-Path $dotbotDir "profiles\default")
+$dotbotInstalled = Test-Path (Join-Path $dotbotDir "workflows\default")
 if (-not $dotbotInstalled) {
     Write-TestResult -Name "Layer 2 prerequisites" -Status Fail -Message "dotbot not installed globally — run install.ps1 first"
     Write-TestSummary -LayerName "Layer 2: Server Startup"
@@ -125,10 +125,10 @@ function Stop-UiServer {
     )
     if ($null -eq $Process) { return }
     if (-not $Process.HasExited) {
-        try { $Process.Kill() } catch {}
-        try { $Process.WaitForExit(3000) } catch {}
+        try { $Process.Kill() } catch { Write-Verbose "Non-critical operation failed: $_" }
+        try { $Process.WaitForExit(3000) } catch { Write-Verbose "Cleanup: failed to stop process: $_" }
     }
-    try { $Process.Dispose() } catch {}
+    try { $Process.Dispose() } catch { Write-Verbose "Cleanup: failed to stop process: $_" }
 }
 
 function Initialize-TestBotProject {
@@ -203,7 +203,7 @@ try {
         try {
             $resp = Invoke-WebRequest -Uri "http://localhost:$portA/api/info" -TimeoutSec 2 -ErrorAction Stop
             $infoConflict = $resp.Content | ConvertFrom-Json
-        } catch {}
+        } catch { Write-Verbose "Failed to parse data: $_" }
 
         if ($infoConflict) {
             Assert-True -Name "Conflicting port /api/info returns different project_root" `

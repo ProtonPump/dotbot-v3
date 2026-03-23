@@ -25,7 +25,7 @@ Write-Host ""
 Reset-TestResults
 
 # Check prerequisite: dotbot must be installed
-$dotbotInstalled = Test-Path (Join-Path $dotbotDir "profiles\default")
+$dotbotInstalled = Test-Path (Join-Path $dotbotDir "workflows\default")
 if (-not $dotbotInstalled) {
     Write-TestResult -Name "Layer 2 prerequisites" -Status Fail -Message "dotbot not installed globally — run install.ps1 first"
     Write-TestSummary -LayerName "Layer 2: Components"
@@ -66,7 +66,7 @@ if (Test-Path $verifyConfigPath) {
         }
         $verifyConfig.scripts = $existingScripts
         $verifyConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $verifyConfigPath -Encoding UTF8
-    } catch {}
+    } catch { Write-Verbose "Failed to write file: $_" }
 }
 
 if (-not (Test-Path $botDir)) {
@@ -434,6 +434,218 @@ try {
     Assert-True -Name "task_create rejects invalid category" `
         -Condition ($null -ne $badCatResponse -and $null -ne $badCatResponse.error) `
         -Message "Expected error response for invalid category"
+
+    Write-Host ""
+
+    # ═══════════════════════════════════════════════════════════════════
+    # TASK TYPES
+    # ═══════════════════════════════════════════════════════════════════
+
+    Write-Host "  TASK TYPES" -ForegroundColor Cyan
+    Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray
+
+    # Create a script-type task
+    $requestId++
+    $scriptTaskResponse = Send-McpRequest -Process $mcpProcess -Request @{
+        jsonrpc = '2.0'
+        id      = $requestId
+        method  = 'tools/call'
+        params  = @{
+            name      = 'task_create'
+            arguments = @{
+                name        = 'Test Script Task'
+                description = 'Run a PowerShell script'
+                type        = 'script'
+                script_path = 'scripts/test-script.ps1'
+                priority    = 5
+                effort      = 'XS'
+            }
+        }
+    }
+
+    if ($scriptTaskResponse -and $scriptTaskResponse.result) {
+        $stText = $scriptTaskResponse.result.content[0].text
+        $stObj = $stText | ConvertFrom-Json
+        Assert-True -Name "task_create with type 'script' succeeds" `
+            -Condition ($stObj.success -eq $true) `
+            -Message "Failed: $stText"
+
+        # Verify type and skip fields persist
+        if ($stObj.file_path -and (Test-Path $stObj.file_path)) {
+            $stContent = Get-Content $stObj.file_path -Raw | ConvertFrom-Json
+            Assert-Equal -Name "script task type persists" -Expected "script" -Actual $stContent.type
+            Assert-Equal -Name "script task script_path persists" -Expected "scripts/test-script.ps1" -Actual $stContent.script_path
+            Assert-True -Name "script task skip_analysis defaults true" `
+                -Condition ($stContent.skip_analysis -eq $true) `
+                -Message "Expected skip_analysis=true, got $($stContent.skip_analysis)"
+            Assert-True -Name "script task skip_worktree defaults true" `
+                -Condition ($stContent.skip_worktree -eq $true) `
+                -Message "Expected skip_worktree=true, got $($stContent.skip_worktree)"
+        }
+    } else {
+        Assert-True -Name "task_create with type 'script' succeeds" `
+            -Condition ($false) -Message "Error or no response"
+    }
+
+    # Create an mcp-type task
+    $requestId++
+    $mcpTaskResponse = Send-McpRequest -Process $mcpProcess -Request @{
+        jsonrpc = '2.0'
+        id      = $requestId
+        method  = 'tools/call'
+        params  = @{
+            name      = 'task_create'
+            arguments = @{
+                name        = 'Test MCP Task'
+                description = 'Call an MCP tool'
+                type        = 'mcp'
+                mcp_tool    = 'bs_yaml_aggregate'
+                priority    = 5
+                effort      = 'XS'
+            }
+        }
+    }
+
+    if ($mcpTaskResponse -and $mcpTaskResponse.result) {
+        $mtText = $mcpTaskResponse.result.content[0].text
+        $mtObj = $mtText | ConvertFrom-Json
+        Assert-True -Name "task_create with type 'mcp' succeeds" `
+            -Condition ($mtObj.success -eq $true) `
+            -Message "Failed: $mtText"
+
+        if ($mtObj.file_path -and (Test-Path $mtObj.file_path)) {
+            $mtContent = Get-Content $mtObj.file_path -Raw | ConvertFrom-Json
+            Assert-Equal -Name "mcp task type persists" -Expected "mcp" -Actual $mtContent.type
+            Assert-Equal -Name "mcp task mcp_tool persists" -Expected "bs_yaml_aggregate" -Actual $mtContent.mcp_tool
+        }
+    } else {
+        Assert-True -Name "task_create with type 'mcp' succeeds" `
+            -Condition ($false) -Message "Error or no response"
+    }
+
+    # Create a task_gen-type task
+    $requestId++
+    $tgTaskResponse = Send-McpRequest -Process $mcpProcess -Request @{
+        jsonrpc = '2.0'
+        id      = $requestId
+        method  = 'tools/call'
+        params  = @{
+            name      = 'task_create'
+            arguments = @{
+                name        = 'Test Task Gen'
+                description = 'Generate more tasks'
+                type        = 'task_gen'
+                script_path = 'scripts/gen-tasks.ps1'
+                priority    = 5
+                effort      = 'XS'
+            }
+        }
+    }
+
+    if ($tgTaskResponse -and $tgTaskResponse.result) {
+        $tgText = $tgTaskResponse.result.content[0].text
+        $tgObj = $tgText | ConvertFrom-Json
+        Assert-True -Name "task_create with type 'task_gen' succeeds" `
+            -Condition ($tgObj.success -eq $true) `
+            -Message "Failed: $tgText"
+
+        if ($tgObj.file_path -and (Test-Path $tgObj.file_path)) {
+            $tgContent = Get-Content $tgObj.file_path -Raw | ConvertFrom-Json
+            Assert-Equal -Name "task_gen task type persists" -Expected "task_gen" -Actual $tgContent.type
+        }
+    } else {
+        Assert-True -Name "task_create with type 'task_gen' succeeds" `
+            -Condition ($false) -Message "Error or no response"
+    }
+
+    # Prompt task defaults: type='prompt', skip_analysis=false
+    $requestId++
+    $promptTaskResponse = Send-McpRequest -Process $mcpProcess -Request @{
+        jsonrpc = '2.0'
+        id      = $requestId
+        method  = 'tools/call'
+        params  = @{
+            name      = 'task_create'
+            arguments = @{
+                name        = 'Test Prompt Task'
+                description = 'Default prompt task'
+                priority    = 5
+                effort      = 'XS'
+            }
+        }
+    }
+
+    if ($promptTaskResponse -and $promptTaskResponse.result) {
+        $ptText = $promptTaskResponse.result.content[0].text
+        $ptObj = $ptText | ConvertFrom-Json
+        if ($ptObj.file_path -and (Test-Path $ptObj.file_path)) {
+            $ptContent = Get-Content $ptObj.file_path -Raw | ConvertFrom-Json
+            Assert-Equal -Name "prompt task type defaults to 'prompt'" -Expected "prompt" -Actual $ptContent.type
+            Assert-True -Name "prompt task skip_analysis defaults false" `
+                -Condition ($ptContent.skip_analysis -eq $false) `
+                -Message "Expected skip_analysis=false, got $($ptContent.skip_analysis)"
+        }
+    }
+
+    # Validation: script type without script_path should fail
+    $requestId++
+    $badScriptResponse = Send-McpRequest -Process $mcpProcess -Request @{
+        jsonrpc = '2.0'
+        id      = $requestId
+        method  = 'tools/call'
+        params  = @{
+            name      = 'task_create'
+            arguments = @{
+                name        = 'Bad Script Task'
+                description = 'Missing script_path'
+                type        = 'script'
+            }
+        }
+    }
+
+    Assert-True -Name "task_create rejects script type without script_path" `
+        -Condition ($null -ne $badScriptResponse -and $null -ne $badScriptResponse.error) `
+        -Message "Expected error for script type without script_path"
+
+    # Validation: mcp type without mcp_tool should fail
+    $requestId++
+    $badMcpResponse = Send-McpRequest -Process $mcpProcess -Request @{
+        jsonrpc = '2.0'
+        id      = $requestId
+        method  = 'tools/call'
+        params  = @{
+            name      = 'task_create'
+            arguments = @{
+                name        = 'Bad MCP Task'
+                description = 'Missing mcp_tool'
+                type        = 'mcp'
+            }
+        }
+    }
+
+    Assert-True -Name "task_create rejects mcp type without mcp_tool" `
+        -Condition ($null -ne $badMcpResponse -and $null -ne $badMcpResponse.error) `
+        -Message "Expected error for mcp type without mcp_tool"
+
+    # Validation: invalid type should fail
+    $requestId++
+    $badTypeResponse = Send-McpRequest -Process $mcpProcess -Request @{
+        jsonrpc = '2.0'
+        id      = $requestId
+        method  = 'tools/call'
+        params  = @{
+            name      = 'task_create'
+            arguments = @{
+                name        = 'Bad Type Task'
+                description = 'Invalid type'
+                type        = 'invalid_type'
+            }
+        }
+    }
+
+    Assert-True -Name "task_create rejects invalid type" `
+        -Condition ($null -ne $badTypeResponse -and $null -ne $badTypeResponse.error) `
+        -Message "Expected error for invalid type"
 
     Write-Host ""
 
@@ -856,12 +1068,12 @@ Write-Host "  PROVIDERCLI MODULE" -ForegroundColor Cyan
 Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray
 
 # Test that ProviderCLI module loads (use dotbotDir which points to installed profiles)
-$providerCliPath = Join-Path $dotbotDir "profiles\default\systems\runtime\ProviderCLI\ProviderCLI.psm1"
+$providerCliPath = Join-Path $dotbotDir "workflows\default\systems\runtime\ProviderCLI\ProviderCLI.psm1"
 $providerCliLoaded = $false
 try {
     Import-Module $providerCliPath -Force -ErrorAction Stop
     $providerCliLoaded = $true
-} catch {}
+} catch { Write-Verbose "Non-critical operation failed: $_" }
 
 Assert-True -Name "ProviderCLI module loads" `
     -Condition $providerCliLoaded `
@@ -870,21 +1082,21 @@ Assert-True -Name "ProviderCLI module loads" `
 if ($providerCliLoaded) {
     # Test Get-ProviderConfig for Claude (default)
     $claudeConfig = $null
-    try { $claudeConfig = Get-ProviderConfig -Name "claude" } catch {}
+    try { $claudeConfig = Get-ProviderConfig -Name "claude" } catch { Write-Verbose "Settings operation failed: $_" }
     Assert-True -Name "Get-ProviderConfig loads claude config" `
         -Condition ($null -ne $claudeConfig -and $claudeConfig.name -eq "claude") `
         -Message "Expected claude config"
 
     # Test Get-ProviderModels
     $models = $null
-    try { $models = Get-ProviderModels -ProviderName "claude" } catch {}
+    try { $models = Get-ProviderModels -ProviderName "claude" } catch { Write-Verbose "Settings operation failed: $_" }
     Assert-True -Name "Get-ProviderModels returns Claude models" `
         -Condition ($null -ne $models -and $models.Count -ge 2) `
         -Message "Expected at least 2 models"
 
     # Test Resolve-ProviderModelId
     $resolvedId = $null
-    try { $resolvedId = Resolve-ProviderModelId -ModelAlias "Opus" -ProviderName "claude" } catch {}
+    try { $resolvedId = Resolve-ProviderModelId -ModelAlias "Opus" -ProviderName "claude" } catch { Write-Verbose "Non-critical operation failed: $_" }
     Assert-True -Name "Resolve-ProviderModelId maps Opus" `
         -Condition ($resolvedId -eq "opus") `
         -Message "Expected opus, got $resolvedId"
@@ -898,14 +1110,14 @@ if ($providerCliLoaded) {
 
     # Test New-ProviderSession for Claude (returns GUID)
     $claudeSession = $null
-    try { $claudeSession = New-ProviderSession -ProviderName "claude" } catch {}
+    try { $claudeSession = New-ProviderSession -ProviderName "claude" } catch { Write-Verbose "Session operation failed: $_" }
     Assert-True -Name "New-ProviderSession returns GUID for Claude" `
         -Condition ($null -ne $claudeSession -and $claudeSession -match '^[0-9a-f]{8}-') `
         -Message "Expected GUID, got $claudeSession"
 
     # Test New-ProviderSession for Codex (returns null)
     $codexSession = "not-null"
-    try { $codexSession = New-ProviderSession -ProviderName "codex" } catch {}
+    try { $codexSession = New-ProviderSession -ProviderName "codex" } catch { Write-Verbose "Session operation failed: $_" }
     Assert-True -Name "New-ProviderSession returns null for Codex" `
         -Condition ($null -eq $codexSession) `
         -Message "Expected null, got $codexSession"
@@ -1021,13 +1233,13 @@ Write-Host ""
 Write-Host "  kickstart-via-jira TOOL REGISTRATION" -ForegroundColor Cyan
 Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray
 
-$kickstartViaJiraProfile = Join-Path $dotbotDir "profiles\kickstart-via-jira"
+$kickstartViaJiraProfile = Join-Path $dotbotDir "workflows\kickstart-via-jira"
 if (Test-Path $kickstartViaJiraProfile) {
     $mrTestProject = New-TestProject
     $mrBotDir = Join-Path $mrTestProject ".bot"
 
     Push-Location $mrTestProject
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dotbotDir "scripts\init-project.ps1") -Profile kickstart-via-jira 2>&1 | Out-Null
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dotbotDir "scripts\init-project.ps1") -Workflow kickstart-via-jira 2>&1 | Out-Null
     & git add -A 2>&1 | Out-Null
     & git commit -m "dotbot init kickstart-via-jira" --quiet 2>&1 | Out-Null
     Pop-Location
@@ -1044,7 +1256,7 @@ if (Test-Path $kickstartViaJiraProfile) {
             }
             $vc.scripts = $existing
             $vc | ConvertTo-Json -Depth 5 | Set-Content -Path $mrVerifyConfig -Encoding UTF8
-        } catch {}
+        } catch { Write-Verbose "Failed to parse data: $_" }
     }
 
     $mrMcpProcess = $null
@@ -1217,14 +1429,14 @@ Write-Host ""
 Write-Host "  kickstart-via-pr TOOL REGISTRATION" -ForegroundColor Cyan
 Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray
 
-$kickstartViaPrProfile = Join-Path $dotbotDir "profiles\kickstart-via-pr"
+$kickstartViaPrProfile = Join-Path $dotbotDir "workflows\kickstart-via-pr"
 Assert-PathExists -Name "kickstart-via-pr profile source exists" -Path $kickstartViaPrProfile
 if (Test-Path $kickstartViaPrProfile) {
     $prTestProject = New-TestProject
     $prBotDir = Join-Path $prTestProject ".bot"
 
     Push-Location $prTestProject
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dotbotDir "scripts\init-project.ps1") -Profile kickstart-via-pr 2>&1 | Out-Null
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dotbotDir "scripts\init-project.ps1") -Workflow kickstart-via-pr 2>&1 | Out-Null
     & git add -A 2>&1 | Out-Null
     & git commit -m "dotbot init kickstart-via-pr" --quiet 2>&1 | Out-Null
     Pop-Location
@@ -1240,7 +1452,7 @@ if (Test-Path $kickstartViaPrProfile) {
             }
             $vc.scripts = $existing
             $vc | ConvertTo-Json -Depth 5 | Set-Content -Path $prVerifyConfig -Encoding UTF8
-        } catch {}
+        } catch { Write-Verbose "Failed to parse data: $_" }
     }
 
     $prMcpProcess = $null
@@ -1606,7 +1818,7 @@ Write-Host "  PRODUCT API DIRECT TESTS" -ForegroundColor Cyan
 Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
-$productApiModule = Join-Path $repoRoot "profiles\default\systems\ui\modules\ProductAPI.psm1"
+$productApiModule = Join-Path $repoRoot "workflows\default\systems\ui\modules\ProductAPI.psm1"
 if (Test-Path $productApiModule) {
     Import-Module $productApiModule -Force
 
