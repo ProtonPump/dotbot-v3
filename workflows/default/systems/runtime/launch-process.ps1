@@ -1796,6 +1796,16 @@ elseif ($Type -eq 'workflow') {
                 $taskTypeVal = 'prompt'
             }
             if ($taskTypeVal -notin @('prompt')) {
+                # Non-prompt tasks (script/mcp/task_gen) are not parallelisable.
+                # Only slot 0 (or single-instance mode) may execute them;
+                # other slots skip and wait for prompt/scoring tasks.
+                if ($Slot -gt 0) {
+                    Write-Status "Slot ${Slot}: skipping $taskTypeVal task '$($task.name)' (slot 0 only)" -Type Info
+                    Write-ProcessActivity -Id $procId -ActivityType "text" -Message "Slot ${Slot}: waiting for prompt tasks (skipping $taskTypeVal task)"
+                    Start-Sleep -Seconds 5
+                    continue
+                }
+
                 Write-Status "Auto-dispatching $taskTypeVal task: $($task.name)" -Type Process
                 Write-ProcessActivity -Id $procId -ActivityType "text" -Message "Auto-dispatch $taskTypeVal task: $($task.name)"
 
