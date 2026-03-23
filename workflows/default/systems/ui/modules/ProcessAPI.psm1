@@ -281,6 +281,26 @@ function Get-ProcessDetail {
     }
 }
 
+function Get-MaxConcurrent {
+    $botRoot = $script:Config.BotRoot
+    $controlDir = $script:Config.ControlDir
+    $maxConcurrent = 1
+    $settingsPath = Join-Path $botRoot "defaults\settings.default.json"
+    $controlSettingsPath = Join-Path $controlDir "settings.json"
+    foreach ($sp in @($controlSettingsPath, $settingsPath)) {
+        if (Test-Path $sp) {
+            try {
+                $s = Get-Content $sp -Raw | ConvertFrom-Json
+                if ($s.execution -and $s.execution.max_concurrent) {
+                    $maxConcurrent = [int]$s.execution.max_concurrent
+                    break
+                }
+            } catch { Write-Verbose "Failed to parse max_concurrent setting: $_" }
+        }
+    }
+    return $maxConcurrent
+}
+
 function Start-ProcessLaunch {
     param(
         [Parameter(Mandatory)] [string]$Type,
@@ -295,6 +315,15 @@ function Start-ProcessLaunch {
     $processesDir = $script:Config.ProcessesDir
     $botRoot = $script:Config.BotRoot
     $controlDir = $script:Config.ControlDir
+
+    # Auto-concurrent: when launching a workflow without an explicit slot,
+    # check max_concurrent and delegate to Start-ConcurrentWorkflow if > 1.
+    if ($Type -eq 'workflow' -and $Slot -lt 0) {
+        $maxConcurrent = Get-MaxConcurrent
+        if ($maxConcurrent -gt 1) {
+            return Start-ConcurrentWorkflow -WorkflowName $WorkflowName -Description $Description -MaxConcurrent $maxConcurrent
+        }
+    }
 
     $launcherPath = Join-Path $botRoot "systems\runtime\launch-process.ps1"
     if (-not (Test-Path $launcherPath)) {

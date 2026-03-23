@@ -1326,36 +1326,9 @@ try {
                             $bContinue = if ($body.PSObject.Properties['continue']) { $body.continue -eq $true } else { $false }
                             $bDescription = if ($body.PSObject.Properties['description']) { $body.description } else { $null }
                             $bModel = if ($body.PSObject.Properties['model']) { $body.model } else { $null }
-
-                            # For workflow type, check max_concurrent and launch multiple slots if > 1
-                            $maxConcurrent = 1
-                            if ($bType -eq 'workflow') {
-                                $settingsPath = Join-Path $botRoot "defaults\settings.default.json"
-                                $controlSettingsPath = Join-Path $controlDir "settings.json"
-                                foreach ($sp in @($controlSettingsPath, $settingsPath)) {
-                                    if (Test-Path $sp) {
-                                        try {
-                                            $s = Get-Content $sp -Raw | ConvertFrom-Json
-                                            if ($s.execution -and $s.execution.max_concurrent) {
-                                                $maxConcurrent = [int]$s.execution.max_concurrent
-                                                break
-                                            }
-                                        } catch { Write-Verbose "Failed to parse max_concurrent setting: $_" }
-                                    }
-                                }
-                            }
-
-                            if ($maxConcurrent -gt 1 -and $bType -eq 'workflow') {
-                                $wfName = if ($body.PSObject.Properties['workflow']) { $body.workflow } else { $null }
-                                $result = Start-ConcurrentWorkflow -WorkflowName $wfName -Description $bDescription -MaxConcurrent $maxConcurrent
-                                $content = @{
-                                    success = $true
-                                    slots_launched = $result.slots_launched
-                                } | ConvertTo-Json -Compress
-                            } else {
-                                $result = Start-ProcessLaunch -Type $bType -TaskId $bTaskId -Prompt $bPrompt -Continue $bContinue -Description $bDescription -Model $bModel
-                                $content = $result | ConvertTo-Json -Compress
-                            }
+                            # Start-ProcessLaunch auto-detects max_concurrent for workflow type
+                            $result = Start-ProcessLaunch -Type $bType -TaskId $bTaskId -Prompt $bPrompt -Continue $bContinue -Description $bDescription -Model $bModel
+                            $content = $result | ConvertTo-Json -Compress
                         }
                     } else {
                         $statusCode = 405
@@ -1704,39 +1677,15 @@ try {
                                     }
                                 }
 
-                                # Launch workflow process(es)
-                                $maxConcurrent = 1
-                                $settingsPath = Join-Path $botRoot "defaults\settings.default.json"
-                                $controlSettingsPath = Join-Path $controlDir "settings.json"
-                                foreach ($sp in @($controlSettingsPath, $settingsPath)) {
-                                    if (Test-Path $sp) {
-                                        try {
-                                            $s = Get-Content $sp -Raw | ConvertFrom-Json
-                                            if ($s.execution -and $s.execution.max_concurrent) {
-                                                $maxConcurrent = [int]$s.execution.max_concurrent
-                                                break
-                                            }
-                                        } catch { Write-Verbose "Failed to parse max_concurrent setting: $_" }
-                                    }
-                                }
-
-                                if ($maxConcurrent -gt 1) {
-                                    $launchResult = Start-ConcurrentWorkflow -WorkflowName $wfName -Description "Workflow: $wfName" -MaxConcurrent $maxConcurrent
-                                    $content = @{
-                                        success = $true
-                                        workflow = $wfName
-                                        tasks_created = $createdTasks.Count
-                                        slots_launched = $launchResult.slots_launched
-                                    } | ConvertTo-Json -Compress
-                                } else {
-                                    $launchResult = Start-ProcessLaunch -Type 'workflow' -Continue $true -Description "Workflow: $wfName" -WorkflowName $wfName
-                                    $content = @{
-                                        success = $true
-                                        workflow = $wfName
-                                        tasks_created = $createdTasks.Count
-                                        process_id = $launchResult.process_id
-                                    } | ConvertTo-Json -Compress
-                                }
+                                # Start-ProcessLaunch auto-detects max_concurrent for workflow type
+                                $launchResult = Start-ProcessLaunch -Type 'workflow' -Continue $true -Description "Workflow: $wfName" -WorkflowName $wfName
+                                $content = @{
+                                    success = $true
+                                    workflow = $wfName
+                                    tasks_created = $createdTasks.Count
+                                    slots_launched = $launchResult.slots_launched
+                                    process_id = $launchResult.process_id
+                                } | ConvertTo-Json -Compress
                             }
                         } catch {
                             $statusCode = 500
