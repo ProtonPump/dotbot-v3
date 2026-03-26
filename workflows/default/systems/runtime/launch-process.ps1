@@ -2626,17 +2626,8 @@ elseif ($Type -eq 'kickstart') {
         $kickstartPhases = @()
         $manifest = Get-ActiveWorkflowManifest -BotRoot $botRoot
         if ($manifest -and $manifest.tasks -and $manifest.tasks.Count -gt 0) {
-            # Ensure each task has an id (manifest tasks may omit it)
-            $kickstartPhases = @($manifest.tasks | ForEach-Object {
-                $t = $_
-                if (-not $t.id -and -not ($t -is [System.Collections.IDictionary] -and $t['id'])) {
-                    $taskName = if ($t -is [System.Collections.IDictionary]) { $t['name'] } else { $t.name }
-                    $genId = ($taskName -replace '[^\w\s-]', '' -replace '\s+', '-').ToLower()
-                    if ($t -is [System.Collections.IDictionary]) { $t['id'] = $genId }
-                    else { $t | Add-Member -NotePropertyName 'id' -NotePropertyValue $genId -Force }
-                }
-                $t
-            })
+            Ensure-ManifestTaskIds -Tasks $manifest.tasks
+            $kickstartPhases = @($manifest.tasks)
         }
 
         # Fallback to settings.kickstart.phases for legacy installs
