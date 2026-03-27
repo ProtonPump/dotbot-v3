@@ -987,6 +987,9 @@ function Invoke-ClaudeStream {
             Write-ActivityLog -Type "compact" -Message "turn=$($state.turnCount) ctx=${ctxTokens} (${pct}%) $compactMsg"
             [Console]::Error.WriteLine("$($t.Amber)⚠ CONTEXT COMPACTED at turn $($state.turnCount) ($ctxTokens tokens, ${pct}%)$($t.Reset)")
             [Console]::Error.Flush()
+            # Reset usage-logging threshold so milestones (including >80% warning) fire again
+            # as the compacted context regrows.
+            $state.lastUsageLogAt = 0
             return
         }
 
