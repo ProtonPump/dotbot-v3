@@ -51,4 +51,8 @@ jobs:
               headers: { 'Content-Type': 'application/json' },
               body,
             });
-            core.info(`Discord response: ${resp.status}`);
+            if (!resp.ok) {
+              core.setFailed(`Discord webhook failed: ${resp.status} ${await resp.text()}`);
+            } else {
+              core.info(`Discord response: ${resp.status}`);
+            }

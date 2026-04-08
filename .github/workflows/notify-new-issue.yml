@@ -23,7 +23,7 @@ jobs:
 
           LABELS=$(echo '${{ toJSON(github.event.issue.labels.*.name) }}' | jq -r 'join(", ")')
 
-          curl -s -o /dev/null -w "%{http_code}" \
+          curl -sf --fail-with-body \
             -H "Content-Type: application/json" \
             -d "$(jq -n \
               --arg title "${{ github.event.issue.title }}" \

@@ -36,7 +36,10 @@ jobs:
               per_page: 100,
             });
 
-            const stale = issues.filter(i => new Date(i.created_at) < twoDaysAgo);
+            // Filter out PRs (listForRepo returns both issues and PRs)
+            const stale = issues
+              .filter(i => !i.pull_request)
+              .filter(i => new Date(i.created_at) < twoDaysAgo);
             if (stale.length === 0) {
               core.info('No untriaged issues older than 2 days.');
               return;
@@ -63,4 +66,8 @@ jobs:
               headers: { 'Content-Type': 'application/json' },
               body,
             });
-            core.info(`Discord response: ${resp.status}`);
+            if (!resp.ok) {
+              core.setFailed(`Discord webhook failed: ${resp.status} ${await resp.text()}`);
+            } else {
+              core.info(`Discord response: ${resp.status}`);
+            }

@@ -1,7 +1,9 @@
 name: "PR link check"
 
 on:
-  pull_request:
+  # pull_request_target so the token can comment on fork PRs.
+  # Safe: this workflow only reads the event payload, no code checkout.
+  pull_request_target:
     types: [opened, edited, synchronize]
 
 permissions:
