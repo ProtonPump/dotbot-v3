@@ -275,6 +275,11 @@ function Get-StaticAssetVersion {
 }
 
 function Add-StaticAssetVersions {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSUseSingularNouns',
+        '',
+        Justification = 'The function versions multiple asset references within one HTML document.'
+    )]
     param(
         [Parameter(Mandatory)]
         [string]$Html
