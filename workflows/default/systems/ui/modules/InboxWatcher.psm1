@@ -14,7 +14,7 @@ entirely — no PS event system, no $script: scope issues, no silent failures.
 #>
 
 # Module-scope state
-$script:Workers     = [System.Collections.Generic.List[hashtable]]::new()  # { PS; StopFlag }
+$script:Workers     = [System.Collections.Generic.List[hashtable]]::new()  # { PS; StopFlag; EventJob }
 $script:Initialized = $false
 
 function Initialize-InboxWatcher {
@@ -141,6 +141,10 @@ function Initialize-InboxWatcher {
         $workerRunspace.SessionStateProxy.SetVariable('LogPath',        $logPath)
         $workerRunspace.SessionStateProxy.SetVariable('MaxConcurrent',   $maxConcurrent)
         $workerRunspace.SessionStateProxy.SetVariable('CoalesceWindow', $coalesceWindow)
+        # StopFlag is a single-element bool array so the worker runspace receives a
+        # reference to the same .NET object, not a copy.  This works correctly for
+        # standard (non-constrained) runspaces created via CreateRunspace() — variable
+        # injection does not serialize for in-process runspaces.
         $stopFlag = [bool[]](,$false)
         $workerRunspace.SessionStateProxy.SetVariable('StopFlag',       $stopFlag)
 
@@ -172,7 +176,9 @@ function Initialize-InboxWatcher {
                                              [System.IO.NotifyFilters]::CreationTime
             $watcher.InternalBufferSize    = 65536
             $watcher.IncludeSubdirectories = $false
-            $watcher.EnableRaisingEvents   = $true
+            # EnableRaisingEvents is not needed when using synchronous WaitForChanged().
+            # Leaving it true just buffers events through the async mechanism unnecessarily.
+            $watcher.EnableRaisingEvents   = $false
 
             $watchTypes = [System.IO.WatcherChangeTypes]::None
             if ($WatchCreated) { $watchTypes = $watchTypes -bor [System.IO.WatcherChangeTypes]::Created }
@@ -183,8 +189,11 @@ function Initialize-InboxWatcher {
             $pendingFiles      = [System.Collections.Generic.List[hashtable]]::new()
             $lastEventTime     = [DateTime]::MinValue
 
-            # Launched for both mid-loop flushes and the on-shutdown flush.
-            # Closes over $pendingFiles, $runningProcs, and all injected variables.
+            # $flushPending is a scriptblock rather than a named function so it can close
+            # over $pendingFiles, $runningProcs, and the injected runspace variables without
+            # threading them through an explicit parameter list.  It mutates $runningProcs
+            # (prune exited + add new) but never touches $pendingFiles directly — the caller
+            # always calls $pendingFiles.Clear() after invoking it.
             $flushPending = {
                 if ($pendingFiles.Count -eq 0) { return }
 
@@ -217,6 +226,16 @@ function Initialize-InboxWatcher {
                 # reliably quote array elements that contain spaces.
                 $launchersDir = Join-Path $BotRoot ".control" "launchers"
                 $null         = New-Item -ItemType Directory -Force -Path $launchersDir -ErrorAction SilentlyContinue
+
+                # Prune launcher pairs older than 1 hour to prevent unbounded growth.
+                Get-ChildItem -Path $launchersDir -Filter "inbox-launcher-*.ps1" -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.LastWriteTime -lt [DateTime]::Now.AddHours(-1) } |
+                    ForEach-Object {
+                        $s = $_.BaseName -replace '^inbox-launcher-', ''
+                        Remove-Item (Join-Path $launchersDir "inbox-prompt-$s.txt") -Force -ErrorAction SilentlyContinue
+                        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+                    }
+
                 $stamp        = [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss-fff")
                 $promptFile   = Join-Path $launchersDir "inbox-prompt-$stamp.txt"
                 $wrapperPath  = Join-Path $launchersDir "inbox-launcher-$stamp.ps1"
@@ -257,7 +276,10 @@ function Initialize-InboxWatcher {
                                 } else {
                                     $recentlyProcessed[$filePath] = $now
 
-                                    # Purge stale debounce entries (older than 60s)
+                                    # Purge stale debounce entries (older than 60s).
+                                    # This only runs on new file events, so the dictionary
+                                    # retains entries indefinitely during idle periods — a
+                                    # negligible memory leak in practice.
                                     $stale = @($recentlyProcessed.Keys | Where-Object {
                                         ($now - $recentlyProcessed[$_]).TotalSeconds -gt 60
                                     })
@@ -273,7 +295,10 @@ function Initialize-InboxWatcher {
                             }
                         }
 
-                        # Flush once the folder has been quiet for CoalesceWindow seconds
+                        # Flush once the folder has been quiet for CoalesceWindow seconds.
+                        # Note: WaitForChanged() returns one event per call, so a burst of N
+                        # files arriving within the 2 s timeout takes N loop iterations to
+                        # enqueue — the coalesce window starts from the *last* queued file.
                         if ($pendingFiles.Count -gt 0 -and
                             ($now - $lastEventTime).TotalSeconds -ge $CoalesceWindow) {
                             & $flushPending
@@ -300,7 +325,21 @@ function Initialize-InboxWatcher {
             }
         })
         $null = $ps.BeginInvoke()
-        $script:Workers.Add(@{ PS = $ps; StopFlag = $stopFlag })
+
+        # Surface unhandled worker failures back to the server log.  Only 'Failed'
+        # is logged — 'Completed' is the normal exit via StopFlag and 'Stopped' is
+        # the forced exit from $ps.Stop() in Stop-InboxWatcher.
+        $eventJob = Register-ObjectEvent -InputObject $ps -EventName 'InvocationStateChanged' `
+            -MessageData @{ Path = $resolvedPath; LogPath = $logPath } -Action {
+                if ($Event.SourceEventArgs.InvocationStateInfo.State -eq 'Failed') {
+                    $err = $Event.SourceEventArgs.InvocationStateInfo.Reason?.Message ?? 'unknown error'
+                    Add-Content -LiteralPath $Event.MessageData.LogPath `
+                        -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [InboxWatcher] Worker FAILED for $($Event.MessageData.Path): $err" `
+                        -ErrorAction SilentlyContinue
+                }
+            }
+
+        $script:Workers.Add(@{ PS = $ps; StopFlag = $stopFlag; EventJob = $eventJob })
         Write-BotLog -Level Info -Message "[InboxWatcher] Worker started for: $resolvedPath (filter: $filter, events: $($events -join ', '))"
     }
 
@@ -322,6 +361,12 @@ function Stop-InboxWatcher {
     Start-Sleep -Milliseconds 2500
 
     foreach ($worker in $script:Workers) {
+        # Unregister the failure-notification event before stopping so it doesn't
+        # fire for the intentional Stopped transition.
+        if ($worker.EventJob) {
+            Unregister-Event -SourceIdentifier $worker.EventJob.Name -ErrorAction SilentlyContinue
+            Remove-Job -Job $worker.EventJob -Force -ErrorAction SilentlyContinue
+        }
         try {
             $worker.PS.Stop()
             $worker.PS.Runspace.Close()
