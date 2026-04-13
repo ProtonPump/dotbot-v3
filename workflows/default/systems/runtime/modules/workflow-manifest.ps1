@@ -324,6 +324,16 @@ function New-WorkflowTask {
     $mcpTool     = $TaskDef['mcp_tool']
     $mcpArgs     = $TaskDef['mcp_args']
 
+    # task_gen with a 'workflow' prompt file but no script_path → prompt_template
+    # workflow.yaml uses  type: task_gen + workflow: "02a-foo.md"  to mean
+    # "run Claude with this prompt to generate tasks". Map it to prompt_template
+    # so the task-runner dispatches it correctly via the LLM path.
+    $promptFromWorkflow = $null
+    if ($type -eq 'task_gen' -and -not $scriptPath -and $TaskDef['workflow'] -and $TaskDef['workflow'] -match '\.md$') {
+        $type              = 'prompt_template'
+        $promptFromWorkflow = "recipes/prompts/$($TaskDef['workflow'])"
+    }
+
     # Dependencies: convert from manifest format (string names)
     $deps = @()
     if ($TaskDef['depends_on']) { $deps = @($TaskDef['depends_on']) }
@@ -353,6 +363,7 @@ function New-WorkflowTask {
 
     # Optional fields — only set if declared (keeps task JSON clean)
     if ($scriptPath)                           { $task["script_path"] = $scriptPath }
+    if ($promptFromWorkflow)                   { $task["prompt"] = $promptFromWorkflow }
     if ($mcpTool)                              { $task["mcp_tool"] = $mcpTool }
     if ($mcpArgs -and $mcpArgs.Count -gt 0)    { $task["mcp_args"] = $mcpArgs }
     if ($TaskDef['acceptance_criteria'])        { $task["acceptance_criteria"] = @($TaskDef['acceptance_criteria']) }

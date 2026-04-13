@@ -9,20 +9,58 @@ function Invoke-TaskMarkNeedsInput {
 
     $taskId = $Arguments['task_id']
     $question = $Arguments['question']
+    $questionsArg = $Arguments['questions']
     $splitProposal = $Arguments['split_proposal']
 
     if (-not $taskId) { throw "Task ID is required" }
-    if (-not $question -and -not $splitProposal) { throw "Either a question or split_proposal is required" }
-    if ($question -and $splitProposal) { throw "Cannot provide both question and split_proposal - use one at a time" }
+    if (-not $question -and -not $questionsArg -and -not $splitProposal) { throw "Either 'questions' array, 'question' object, or 'split_proposal' is required" }
+    if (($question -or $questionsArg) -and $splitProposal) { throw "Cannot provide both questions and split_proposal - use one at a time" }
 
     # Pre-read the task to build question data before the transition
-    $found = Find-TaskFileById -TaskId $taskId -SearchStatuses @('analysing', 'needs-input')
-    if (-not $found) { throw "Task with ID '$taskId' not found in 'analysing' or 'needs-input' status" }
+    $found = Find-TaskFileById -TaskId $taskId -SearchStatuses @('analysing', 'in-progress', 'needs-input')
+    if (-not $found) { throw "Task with ID '$taskId' not found in 'analysing', 'in-progress', or 'needs-input' status" }
+
+    # Guard: refuse to add more questions if all questions are already answered
+    if (($question -or $questionsArg) -and
+        $found.Content.PSObject.Properties['all_questions_answered'] -and
+        $found.Content.all_questions_answered -eq $true) {
+        throw "all_questions_answered is true — all questions have been answered. Proceed to Step 4 (write summary, call task_mark_done). Do NOT call task_mark_needs_input again."
+    }
 
     # Build updates
     $updates = @{}
 
-    if ($question) {
+    if ($questionsArg) {
+        # Batch questions (preferred path) — store as pending_questions array
+        $questionsResolved = @()
+        if ($found.Content.PSObject.Properties['questions_resolved']) {
+            $questionsResolved = @($found.Content.questions_resolved)
+        }
+        $existingPending = @()
+        if ($found.Content.PSObject.Properties['pending_questions']) {
+            $existingPending = @($found.Content.pending_questions)
+        }
+
+        $askedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+        $baseCount = $questionsResolved.Count + $existingPending.Count
+        $newPending = @()
+        for ($i = 0; $i -lt @($questionsArg).Count; $i++) {
+            $q = @($questionsArg)[$i]
+            $newPending += @{
+                id             = "q$($baseCount + $i + 1)"
+                question       = $q.question
+                context        = $q.context
+                options        = $q.options
+                recommendation = if ($q.recommendation) { $q.recommendation } else { "A" }
+                asked_at       = $askedAt
+            }
+        }
+        $updates['pending_questions'] = $existingPending + $newPending
+        $updates['pending_question'] = $null
+        $updates['split_proposal'] = $null
+        $updates['questions_resolved'] = $questionsResolved
+    }
+    elseif ($question) {
         $questionsResolved = @()
         if ($found.Content.PSObject.Properties['questions_resolved']) {
             $questionsResolved = @($found.Content.questions_resolved)
@@ -51,7 +89,7 @@ function Invoke-TaskMarkNeedsInput {
     }
 
     $result = Move-TaskState -TaskId $taskId `
-        -FromStates @('analysing', 'needs-input') `
+        -FromStates @('analysing', 'in-progress', 'needs-input') `
         -ToState 'needs-input' `
         -Updates $updates
 
@@ -61,7 +99,8 @@ function Invoke-TaskMarkNeedsInput {
     if (-not $result.already_in_state) {
         $claudeSessionId = $env:CLAUDE_SESSION_ID
         if ($claudeSessionId) {
-            Close-SessionOnTask -TaskContent $taskContent -SessionId $claudeSessionId -Phase 'analysis'
+            $sessionPhase = if ($found.Status -eq 'in-progress') { 'execution' } else { 'analysis' }
+            Close-SessionOnTask -TaskContent $taskContent -SessionId $claudeSessionId -Phase $sessionPhase
             $taskContent | ConvertTo-Json -Depth 20 | Set-Content -Path $result.file_path -Encoding UTF8
         }
     }
@@ -110,7 +149,8 @@ function Invoke-TaskMarkNeedsInput {
         file_path  = $result.file_path
     }
 
-    if ($question) { $output['pending_question'] = $taskContent.pending_question }
+    if ($questionsArg) { $output['pending_questions'] = $taskContent.pending_questions; $output['questions_count'] = @($taskContent.pending_questions).Count }
+    elseif ($question) { $output['pending_question'] = $taskContent.pending_question }
     elseif ($splitProposal) { $output['split_proposal'] = $taskContent.split_proposal }
 
     return $output

@@ -335,6 +335,15 @@ function Get-ActionRequired {
                         split_proposal = $task.split_proposal
                         created_at = $task.updated_at
                     }
+                } elseif ($task.PSObject.Properties['pending_questions'] -and $task.pending_questions -and @($task.pending_questions).Count -gt 0) {
+                    # Batch questions (new format)
+                    $actionItems += @{
+                        type = "task-questions"
+                        task_id = $task.id
+                        task_name = $task.name
+                        questions = $task.pending_questions
+                        created_at = $task.updated_at
+                    }
                 } else {
                     $actionItems += @{
                         type = "question"
@@ -381,7 +390,8 @@ function Submit-TaskAnswer {
         [Parameter(Mandatory)] [string]$TaskId,
         $Answer,
         [string]$CustomText,
-        $Attachments  # array of { name, size, content (base64) } from frontend
+        $Attachments,  # array of { name, size, content (base64) } from frontend
+        [string]$QuestionId  # Optional: specific question ID for pending_questions batch
     )
 
     # Use custom text as answer when no option selected
@@ -400,9 +410,17 @@ function Submit-TaskAnswer {
 
         if (Test-Path $taskFilePath) {
             $taskData = Get-Content $taskFilePath -Raw | ConvertFrom-Json
-            $questionId = $taskData.pending_question.id
+            # Determine question ID: prefer explicit param, then batch array, then singular
+            $resolvedQuestionId = $QuestionId
+            if (-not $resolvedQuestionId) {
+                if ($taskData.PSObject.Properties['pending_questions'] -and $taskData.pending_questions -and @($taskData.pending_questions).Count -gt 0) {
+                    $resolvedQuestionId = @($taskData.pending_questions)[0].id
+                } elseif ($taskData.pending_question) {
+                    $resolvedQuestionId = $taskData.pending_question.id
+                }
+            }
 
-            $attachDir = Join-Path $script:Config.BotRoot "workspace\attachments\$TaskId\$questionId"
+            $attachDir = Join-Path $script:Config.BotRoot "workspace\attachments\$TaskId\$resolvedQuestionId"
             if (-not (Test-Path $attachDir)) {
                 New-Item -ItemType Directory -Force -Path $attachDir | Out-Null
             }
@@ -419,7 +437,7 @@ function Submit-TaskAnswer {
                     $bytes = [System.Convert]::FromBase64String($att.content)
                     $filePath = Join-Path $attachDir $safeName
                     [System.IO.File]::WriteAllBytes($filePath, $bytes)
-                    $relPath = ".bot/workspace/attachments/$TaskId/$questionId/$safeName"
+                    $relPath = ".bot/workspace/attachments/$TaskId/$resolvedQuestionId/$safeName"
 
                     $attachmentMeta += @{
                         name = $safeName
@@ -448,6 +466,9 @@ function Submit-TaskAnswer {
     $toolArgs = @{
         task_id = $TaskId
         answer  = $Answer
+    }
+    if ($QuestionId) {
+        $toolArgs['question_id'] = $QuestionId
     }
     if ($attachmentMeta.Count -gt 0) {
         $toolArgs['attachments'] = $attachmentMeta
