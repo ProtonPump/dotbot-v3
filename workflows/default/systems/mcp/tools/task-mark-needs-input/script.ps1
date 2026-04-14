@@ -156,8 +156,14 @@ function Invoke-TaskMarkNeedsInput {
                     }
                 }
                 foreach ($pq in $newPendingQuestions) {
-                    $sendResult = Send-TaskNotification -TaskContent $taskContent -PendingQuestion $pq
-                    if ($sendResult.success) {
+                    $maxAttempts = 3
+                    $sendResult  = $null
+                    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+                        $sendResult = Send-TaskNotification -TaskContent $taskContent -PendingQuestion $pq -Settings $settings
+                        if ($sendResult.success) { break }
+                        if ($attempt -lt $maxAttempts) { Start-Sleep -Milliseconds 500 }
+                    }
+                    if ($sendResult -and $sendResult.success) {
                         $notificationsMap[$pq.id] = @{
                             question_id = $sendResult.question_id
                             instance_id = $sendResult.instance_id

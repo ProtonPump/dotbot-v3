@@ -110,16 +110,22 @@ function Invoke-NotificationPollTick {
             $hasSingleQ     = $taskContent.PSObject.Properties['pending_question'] -and $taskContent.pending_question
 
             # Determine notification type: question or split proposal
-            $isQuestion = [bool]$taskContent.pending_question
-            $isSplit    = [bool]$taskContent.split_proposal
+            $isQuestion  = [bool]$taskContent.pending_question
+            $isSplit     = [bool]$taskContent.split_proposal
+            $isBatchQs   = $taskContent.PSObject.Properties['pending_questions'] -and
+                           $taskContent.pending_questions -and
+                           @($taskContent.pending_questions).Count -gt 0
 
-            # Skip tasks that have neither (already answered/resolved)
-            if (-not $isQuestion -and -not $isSplit) {
+            # Skip tasks that have nothing actionable
+            if (-not $isQuestion -and -not $isSplit -and -not $isBatchQs) {
                 continue
             }
 
             $notification = $taskContent.notification
-            $response = Get-TaskNotificationResponse -Notification $notification -Settings $settings
+            $response = $null
+            if ($notification) {
+                $response = Get-TaskNotificationResponse -Notification $notification -Settings $settings
+            }
 
             if ($response) {
                 # Re-check that the task is still in needs-input (first-write-wins)

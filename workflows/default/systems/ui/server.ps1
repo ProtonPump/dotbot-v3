@@ -2366,7 +2366,7 @@ $docContext
             }
             $response.StatusCode = $statusCode
             $response.ContentType = $contentType
-            if ($url -eq "/" -or $contentType -like "text/html*") {
+            if ($url -eq "/" -or $contentType -like "text/html*" -or $contentType -like "application/javascript*") {
                 $response.Headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
                 $response.Headers['Pragma'] = 'no-cache'
                 $response.Headers['Expires'] = '0'

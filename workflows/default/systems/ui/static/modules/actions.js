@@ -452,7 +452,7 @@ async function submitTaskQuestion(taskId, questionId) {
             questionBlock.innerHTML = `<div class="interview-answered-notice">Q answered ✓ — ${result.questions_remaining_count > 0 ? result.questions_remaining_count + ' question(s) still pending' : 'all done, task resuming...'}</div>`;
 
             // Refresh after a short delay
-            setTimeout(() => refreshActionItems(), 1500);
+            setTimeout(() => fetchAndRenderActionItems(), 1500);
         } else {
             if (submitBtn) {
                 submitBtn.disabled = false;

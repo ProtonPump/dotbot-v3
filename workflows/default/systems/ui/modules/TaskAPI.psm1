@@ -401,6 +401,7 @@ function Submit-TaskAnswer {
 
     # Save attachment files to disk and build metadata
     $attachmentMeta = @()
+    $resolvedQuestionId = $QuestionId   # may be overridden below if attachments need it
     if ($Attachments -and @($Attachments).Count -gt 0) {
         $allowedExtensions = @('.md', '.docx', '.xlsx', '.pdf', '.txt')
 
