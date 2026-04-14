@@ -1059,12 +1059,20 @@ Assert-True -Name "Fix#1: workflow-manifest.ps1 Import-Module for ManifestCondit
     -Condition ($workflowManifestSrc -match 'Import-Module\s+\(Join-Path\s+\$PSScriptRoot\s+"ManifestCondition\.psm1"\)[^\r\n]*-Global')
 
 # Regression: dot-source workflow-manifest.ps1 inside a nested scriptblock and
-# verify Test-ManifestCondition is callable from that child scope via the
-# -Global import. This is the exact failure mode seen in HTTP route handlers.
+# verify Test-ManifestCondition remains visible *after that child scope exits*
+# via the -Global import. This reproduces the HTTP route handler failure mode:
+# if the module is imported without -Global, the function would be visible
+# only inside the scriptblock and disappear when it returns. Checking
+# Get-Command outside the scriptblock is what actually validates -Global.
 Remove-Module ManifestCondition -Force -ErrorAction SilentlyContinue
-$nestedProbe = & {
-    . $workflowManifestPath
-    (Get-Command Test-ManifestCondition -ErrorAction SilentlyContinue) -ne $null
+$nestedProbe = $false
+try {
+    & {
+        . $workflowManifestPath
+    }
+    $nestedProbe = (Get-Command Test-ManifestCondition -ErrorAction SilentlyContinue) -ne $null
+} finally {
+    Remove-Module ManifestCondition -Force -ErrorAction SilentlyContinue
 }
 Assert-True -Name "Fix#1: Test-ManifestCondition visible after nested dot-source of workflow-manifest.ps1" `
     -Condition $nestedProbe

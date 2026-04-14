@@ -672,7 +672,10 @@ Instructions:
                     # unpushed phase commits. Users with branch protection on the
                     # default branch can opt out via `auto_push_phase_commits: false`.
                     $currentBranch = git -C $projectRoot rev-parse --abbrev-ref HEAD 2>$null
-                    if ($currentBranch -and $currentBranch -notmatch '^task/') {
+                    $branchLookupExit = $LASTEXITCODE
+                    if (-not $currentBranch -or $branchLookupExit -ne 0) {
+                        Write-ProcessActivity -Id $procId -ActivityType "text" -Message "Phase $phaseNum push skipped: could not determine current branch (git rev-parse --abbrev-ref HEAD failed or returned empty)"
+                    } elseif ($currentBranch -notmatch '^task/') {
                         $originUrl = git -C $projectRoot remote get-url origin 2>$null
                         if ($LASTEXITCODE -eq 0 -and $originUrl) {
                             $pushOutput = git -C $projectRoot push --quiet origin $currentBranch 2>&1
