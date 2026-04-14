@@ -19,7 +19,7 @@ ToolSearch({ query: "select:mcp__dotbot__decision_get" })
 ToolSearch({ query: "select:mcp__dotbot__task_create_bulk" })
 ```
 
-Issue all ToolSearch calls above in a **single parallel batch**. Do not call ToolSearch again after Phase 0. If you see any `mcp__dotbot__*` tool listed as deferred in your initial tool list, that is expected — ToolSearch loads the schema on demand. Do NOT refuse on the grounds that these tools are "missing".
+Issue all ToolSearch calls above in a **single parallel batch**. Do not call ToolSearch again after Phase 0, and do **NOT** broaden the queries or try alternative search terms. If a `select:` query returns no schema on the first attempt, the dotbot MCP server is still warming up — retry the **exact same** `select:` query after a brief pause. If you see any `mcp__dotbot__*` tool listed as deferred in your initial tool list, that is expected — ToolSearch loads the schema on demand. Do NOT refuse on the grounds that these tools are "missing".
 
 ---
 
