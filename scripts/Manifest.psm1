@@ -40,6 +40,11 @@ function Get-ManifestFileEntries {
         [string[]]$ProtectedPaths
     )
 
+    # The manifest itself lives under .bot/ and may be in ProtectedPaths so
+    # that git-status catches uncommitted edits, but we must never hash it
+    # into itself (circular dependency — the hash changes on every write).
+    $manifestAbs = [System.IO.Path]::Combine($ProjectRoot, '.bot', '.manifest.json')
+
     $entries = [ordered]@{}
     foreach ($rel in $ProtectedPaths) {
         $abs = Join-Path $ProjectRoot $rel
@@ -49,10 +54,13 @@ function Get-ManifestFileEntries {
         if ($item.LinkType) { continue }  # skip symlink/junction at the root
 
         if ($item -is [System.IO.DirectoryInfo]) {
+            # Sort by relative path for deterministic manifest output across platforms.
             Get-ChildItem -LiteralPath $abs -Recurse -File -Force -ErrorAction SilentlyContinue |
                 Where-Object { -not $_.LinkType } |
+                Sort-Object { [System.IO.Path]::GetRelativePath($ProjectRoot, $_.FullName).Replace('\', '/') } |
                 ForEach-Object {
                     $fileRel = [System.IO.Path]::GetRelativePath($ProjectRoot, $_.FullName).Replace('\', '/')
+                    if ($_.FullName -eq $manifestAbs) { return }  # skip self-reference
                     $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
                     $entries[$fileRel] = [ordered]@{
                         sha256 = $hash
@@ -61,6 +69,7 @@ function Get-ManifestFileEntries {
                 }
         } elseif ($item -is [System.IO.FileInfo]) {
             $fileRel = [System.IO.Path]::GetRelativePath($ProjectRoot, $item.FullName).Replace('\', '/')
+            if ($item.FullName -eq $manifestAbs) { continue }  # skip self-reference
             $hash = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
             $entries[$fileRel] = [ordered]@{
                 sha256 = $hash

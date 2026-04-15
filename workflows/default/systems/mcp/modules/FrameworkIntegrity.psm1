@@ -31,6 +31,7 @@ $script:ProtectedPaths = @(
     '.bot/init.ps1',
     '.bot/workflow.yaml',
     '.bot/.gitignore',
+    '.bot/.manifest.json',
     '.bot/README.md'
 )
 
@@ -93,7 +94,7 @@ function Test-FrameworkIntegrity {
           success   — $true if no tampering detected (or nothing to protect)
           reason    — short machine-readable code ('clean', 'gitignored',
                       'pre-first-commit', 'tampered', 'not-a-repo',
-                      'missing-manifest')
+                      'missing-manifest', 'manifest-error', 'git-error')
           message   — human-readable summary
           files     — array of file references (relative paths for manifest
                       results, porcelain lines for git status results)
@@ -171,14 +172,20 @@ function Test-FrameworkIntegrity {
             Import-Module $manifestModule -Force -ErrorAction Stop
             $manifestResult = Test-DotbotManifest -ProjectRoot $projectRoot -ProtectedPaths $script:ProtectedPaths
         } catch {
-            # Leave $manifestResult null; fall through to git status only.
+            $manifestResult = @{
+                success     = $false
+                reason      = 'manifest-error'
+                message     = "Framework manifest validation failed: $($_.Exception.Message)"
+                files       = @()
+                remediation = 'Restore framework files from a trusted copy or re-run: dotbot init --force'
+            }
         }
     }
 
-    if ($null -ne $manifestResult -and $manifestResult.reason -eq 'missing-manifest') {
+    if ($null -ne $manifestResult -and $manifestResult.reason -in @('missing-manifest', 'manifest-error')) {
         return @{
             success     = $false
-            reason      = 'missing-manifest'
+            reason      = $manifestResult.reason
             message     = $manifestResult.message
             files       = @()
             remediation = $manifestResult.remediation
