@@ -2,7 +2,7 @@ name: Bump & Release
 
 on:
   schedule:
-    - cron: '0 8 * * 1'  # Weekly Monday 8am UTC
+    - cron: '0 6 * * 4'  # Weekly Thursday 6am UTC
   workflow_dispatch:
     inputs:
       bump:
