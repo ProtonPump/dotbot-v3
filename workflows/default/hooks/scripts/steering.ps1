@@ -73,7 +73,7 @@ function Get-RunningProcesses {
     return $procs
 }
 
-function Send-Whisper {
+function Send-WhisperToSession {
     param(
         [Parameter(Mandatory)]
         [string]$SessionId,
@@ -177,7 +177,7 @@ function Send-Abort {
         [string]$SessionId
     )
 
-    Send-Whisper -SessionId $SessionId -Message "ABORT: Commit any work in progress and exit gracefully." -Priority "abort"
+    Send-WhisperToSession -SessionId $SessionId -Message "ABORT: Commit any work in progress and exit gracefully." -Priority "abort"
     Write-Host ""
     Write-Host "$($t.Warning)!$($t.Reset) Abort signal sent. Session should commit WIP and exit."
 }
@@ -249,7 +249,7 @@ switch ($Command) {
             Write-Host "$($t.Error)x$($t.Reset) -Message required"
             exit 1
         }
-        Send-Whisper -SessionId $SessionId -Message $Message -Priority $Priority
+        Send-WhisperToSession -SessionId $SessionId -Message $Message -Priority $Priority
     }
     'status' {
         Get-SteeringStatus
