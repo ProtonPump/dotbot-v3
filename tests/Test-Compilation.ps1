@@ -172,10 +172,11 @@ function Get-StaticImportPaths {
 # ─── Directories to Scan ───────────────────────────────────────────────
 
 $scanDirs = @(
-    @{ Name = "profiles/default"; Path = Join-Path $repoRoot "workflows\default" }
-    @{ Name = "stacks/dotnet";  Path = Join-Path $repoRoot "stacks\dotnet" }
-    @{ Name = "workflows/start-from-jira"; Path = Join-Path $repoRoot "workflows\start-from-jira" }
-    @{ Name = "workflows/start-from-pr"; Path = Join-Path $repoRoot "workflows\start-from-pr" }
+    @{ Name = "core";           Path = Join-Path $repoRoot "core" }
+    @{ Name = "workflows/default"; Path = Join-Path $repoRoot "workflows/default" }
+    @{ Name = "stacks/dotnet";  Path = Join-Path $repoRoot "stacks/dotnet" }
+    @{ Name = "workflows/start-from-jira"; Path = Join-Path $repoRoot "workflows/start-from-jira" }
+    @{ Name = "workflows/start-from-pr"; Path = Join-Path $repoRoot "workflows/start-from-pr" }
     @{ Name = "scripts";          Path = Join-Path $repoRoot "scripts" }
     @{ Name = "studio-ui";        Path = Join-Path $repoRoot "studio-ui" }
 )
@@ -291,7 +292,18 @@ foreach ($dir in $scanDirs) {
 
         $importFilesChecked++
 
+        # workflows/default/go.ps1 ships into .bot/, where it sits alongside .bot/core/.
+        # Its $PSScriptRoot/core/* imports do not resolve in the dev source tree
+        # (workflows/default/core/ doesn't exist) — they only work post-init. Skip
+        # static resolution for that file; runtime tests cover it.
+        $skipImportResolution = ($relPath -replace '\\', '/') -eq 'workflows/default/go.ps1'
+
         foreach ($imp in $imports) {
+            if ($skipImportResolution) {
+                Write-TestResult -Name "Import: $relPath -> $($imp.RawPath)" -Status Skip `
+                    -Message "Resolves at runtime in .bot/, not in dev source tree"
+                continue
+            }
             # Normalize the resolved path
             $resolved = $null
             try {

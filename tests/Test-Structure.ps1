@@ -261,15 +261,16 @@ if (-not $dotbotInstalled) {
         foreach ($dir in $todoArchiveDirs) {
             Assert-PathExists -Name "Todo archive dir: $dir" -Path (Join-Path $botDir "workspace\tasks\todo\$dir")
         }
-        # System directories
-        Assert-PathExists -Name "systems/mcp exists" -Path (Join-Path $botDir "systems\mcp")
-        Assert-PathExists -Name "systems/ui exists" -Path (Join-Path $botDir "systems\ui")
-        Assert-PathExists -Name "systems/runtime exists" -Path (Join-Path $botDir "systems\runtime")
+        # Core (framework) directories
+        Assert-PathExists -Name "core/mcp exists" -Path (Join-Path $botDir "core/mcp")
+        Assert-PathExists -Name "core/ui exists" -Path (Join-Path $botDir "core/ui")
+        Assert-PathExists -Name "core/runtime exists" -Path (Join-Path $botDir "core/runtime")
+        Assert-PathExists -Name "core/agents exists" -Path (Join-Path $botDir "core/agents")
+        Assert-PathExists -Name "core/skills exists" -Path (Join-Path $botDir "core/skills")
+        Assert-PathExists -Name "core/prompts exists" -Path (Join-Path $botDir "core/prompts")
 
-        # Recipes directories
-        Assert-PathExists -Name "recipes/agents exists" -Path (Join-Path $botDir "recipes\agents")
-        Assert-PathExists -Name "recipes/skills exists" -Path (Join-Path $botDir "recipes\skills")
-        Assert-PathExists -Name "recipes/prompts exists" -Path (Join-Path $botDir "recipes\prompts")
+        # Workflow-residue recipes directory (still ships with default until PR-5)
+        Assert-PathExists -Name "recipes/prompts exists" -Path (Join-Path $botDir "recipes/prompts")
 
         # Workspace directories
         Assert-PathExists -Name "workspace/sessions exists" -Path (Join-Path $botDir "workspace\sessions")
@@ -286,7 +287,7 @@ if (-not $dotbotInstalled) {
         Assert-PathExists -Name ".bot/README.md exists" -Path (Join-Path $botDir "README.md")
 
         # MCP server script
-        Assert-PathExists -Name "dotbot-mcp.ps1 exists" -Path (Join-Path $botDir "systems\mcp\dotbot-mcp.ps1")
+        Assert-PathExists -Name "dotbot-mcp.ps1 exists" -Path (Join-Path $botDir "core/mcp/dotbot-mcp.ps1")
 
         # .mcp.json
         $mcpJson = Join-Path $testProject ".mcp.json"
@@ -368,7 +369,7 @@ if (-not $dotbotInstalled) {
         Assert-PathExists -Name "-Force: .bot still exists" -Path $botDir
         Assert-PathExists -Name "-Force: workspace task preserved" -Path $dummyFile
         Assert-PathExists -Name "-Force: .control/settings.json preserved" -Path $dummySettings
-        Assert-PathExists -Name "-Force: system files refreshed" -Path (Join-Path $botDir "systems\mcp\dotbot-mcp.ps1")
+        Assert-PathExists -Name "-Force: system files refreshed" -Path (Join-Path $botDir "core/mcp/dotbot-mcp.ps1")
 
         if ($initialInstanceId) {
             $settingsAfterForce = Get-Content $settingsDefault -Raw | ConvertFrom-Json
@@ -490,8 +491,10 @@ if (-not $dotbotInstalled) {
                 -Path (Join-Path $botDir4 "recipes\prompts\04-post-research-review.md")
             Assert-PathExists -Name "-- start-from-jira: atlassian.md (new research dir)" `
                 -Path (Join-Path $botDir4 "recipes\research\atlassian.md")
+            # Workflow-specific tools install to .bot/workflows/<wf>/tools/<tool>/
+            # via the systems/mcp/tools -> tools remap in init-project.ps1.
             Assert-PathExists -Name "-- start-from-jira: repo-clone/script.ps1 (new tool)" `
-                -Path (Join-Path $botDir4 "systems\mcp\tools\repo-clone\script.ps1")
+                -Path (Join-Path $botDir4 "workflows/start-from-jira/tools/repo-clone/script.ps1")
             Assert-PathExists -Name "-- start-from-jira: settings.default.json (replacement)" `
                 -Path (Join-Path $botDir4 "settings\settings.default.json")
 
@@ -643,9 +646,9 @@ if (-not $dotbotInstalled) {
             Assert-PathExists -Name "-- start-from-pr: 02-plan-tasks.md present" `
                 -Path (Join-Path $botDirPr "recipes\prompts\02-plan-tasks.md")
             Assert-PathExists -Name "-- start-from-pr: pr-context/script.ps1 present" `
-                -Path (Join-Path $botDirPr "systems\mcp\tools\pr-context\script.ps1")
+                -Path (Join-Path $botDirPr "workflows/start-from-pr/tools/pr-context/script.ps1")
             Assert-PathExists -Name "-- start-from-pr: pr-context/metadata.yaml present" `
-                -Path (Join-Path $botDirPr "systems\mcp\tools\pr-context\metadata.yaml")
+                -Path (Join-Path $botDirPr "workflows/start-from-pr/tools/pr-context/metadata.yaml")
             Assert-PathExists -Name "-- start-from-pr: settings.default.json present" `
                 -Path (Join-Path $botDirPr "settings\settings.default.json")
 
@@ -934,14 +937,14 @@ if (Test-Path $settingsFile) {
 }
 
 # ProviderCLI module exists
-$providerCliModule = Join-Path $repoRoot "workflows\default\systems\runtime\ProviderCLI\ProviderCLI.psm1"
+$providerCliModule = Join-Path $repoRoot "core/runtime/ProviderCLI/ProviderCLI.psm1"
 Assert-True -Name "ProviderCLI.psm1 exists" `
     -Condition (Test-Path $providerCliModule) `
     -Message "Expected $providerCliModule"
 
 # Stream parsers exist
 foreach ($parserName in @("Claude", "Codex", "Gemini")) {
-    $parserFile = Join-Path $repoRoot "workflows\default\systems\runtime\ProviderCLI\parsers\Parse-${parserName}Stream.ps1"
+    $parserFile = Join-Path $repoRoot "core/runtime/ProviderCLI/parsers/Parse-${parserName}Stream.ps1"
     Assert-True -Name "Stream parser exists: Parse-${parserName}Stream.ps1" `
         -Condition (Test-Path $parserFile) `
         -Message "Expected $parserFile"
@@ -959,9 +962,9 @@ Write-Host "  ──────────────────────
 $defaultSettingsPath = Join-Path $repoRoot "workflows\default\settings\settings.default.json"
 $kickstartViaJiraSettingsPath = Join-Path $repoRoot "workflows\start-from-jira\settings\settings.default.json"
 $kickstartViaPrSettingsPath = Join-Path $repoRoot "workflows\start-from-pr\settings\settings.default.json"
-$stateBuilderPath = Join-Path $repoRoot "workflows\default\systems\ui\modules\StateBuilder.psm1"
-$uiIndexPath = Join-Path $repoRoot "workflows\default\systems\ui\static\index.html"
-$uiUpdatesPath = Join-Path $repoRoot "workflows\default\systems\ui\static\modules\ui-updates.js"
+$stateBuilderPath = Join-Path $repoRoot "core/ui/modules/StateBuilder.psm1"
+$uiIndexPath = Join-Path $repoRoot "core/ui/static/index.html"
+$uiUpdatesPath = Join-Path $repoRoot "core/ui/static/modules/ui-updates.js"
 
 Assert-FileContains -Name "default settings template has instance_id placeholder" `
     -Path $defaultSettingsPath `
@@ -1041,8 +1044,8 @@ if (Test-Path $workflowsDefault) {
     # Files that implement logging/theming infrastructure and legitimately use raw output
     # Use forward slashes for cross-platform path matching
     $allowlist = @(
-        'systems/runtime/modules/DotBotLog.psm1',
-        'systems/runtime/modules/DotBotTheme.psm1'
+        'core/runtime/modules/DotBotLog.psm1',
+        'core/runtime/modules/DotBotTheme.psm1'
     )
 
     # Patterns for files excluded from enforcement (user-facing scripts, manual test scripts)
@@ -1369,7 +1372,7 @@ Write-Host ""
 Write-Host "  FRAMEWORK FILE PROTECTION" -ForegroundColor Cyan
 Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray
 
-$frameworkIntegrityModule = Join-Path $repoRoot "workflows" "default" "systems" "mcp" "modules" "FrameworkIntegrity.psm1"
+$frameworkIntegrityModule = Join-Path $repoRoot "core" "mcp" "modules" "FrameworkIntegrity.psm1"
 Assert-PathExists -Name "FrameworkIntegrity.psm1 module exists" -Path $frameworkIntegrityModule
 Assert-ValidPowerShell -Name "FrameworkIntegrity.psm1 is valid PowerShell" -Path $frameworkIntegrityModule
 if (Test-Path $frameworkIntegrityModule) {
@@ -1381,7 +1384,7 @@ if (Test-Path $frameworkIntegrityModule) {
         -Path $frameworkIntegrityModule -Pattern 'git check-ignore'
 }
 
-$frameworkIntegrityHook = Join-Path $repoRoot "workflows" "default" "hooks" "verify" "04-framework-integrity.ps1"
+$frameworkIntegrityHook = Join-Path $repoRoot "core" "hooks" "verify" "04-framework-integrity.ps1"
 Assert-PathExists -Name "04-framework-integrity.ps1 verify hook exists" -Path $frameworkIntegrityHook
 Assert-ValidPowerShell -Name "04-framework-integrity.ps1 is valid PowerShell" -Path $frameworkIntegrityHook
 if (Test-Path $frameworkIntegrityHook) {
@@ -1389,7 +1392,7 @@ if (Test-Path $frameworkIntegrityHook) {
         -Path $frameworkIntegrityHook -Pattern 'FrameworkIntegrity\.psm1'
 }
 
-$verifyConfig = Join-Path $repoRoot "workflows" "default" "hooks" "verify" "config.json"
+$verifyConfig = Join-Path $repoRoot "core" "hooks" "verify" "config.json"
 Assert-PathExists -Name "verify/config.json exists" -Path $verifyConfig
 Assert-ValidJson -Name "verify/config.json is valid JSON" -Path $verifyConfig
 if (Test-Path $verifyConfig) {
@@ -1408,7 +1411,7 @@ if (Test-Path $verifyConfig) {
     }
 }
 
-$taskAnalysing = Join-Path $repoRoot "workflows" "default" "systems" "mcp" "tools" "task-mark-analysing" "script.ps1"
+$taskAnalysing = Join-Path $repoRoot "core" "mcp" "tools" "task-mark-analysing" "script.ps1"
 Assert-PathExists -Name "task-mark-analysing/script.ps1 exists" -Path $taskAnalysing
 if (Test-Path $taskAnalysing) {
     Assert-FileContains -Name "task-mark-analysing imports FrameworkIntegrity module" `
@@ -1417,7 +1420,7 @@ if (Test-Path $taskAnalysing) {
         -Path $taskAnalysing -Pattern 'Invoke-FrameworkIntegrityGate'
 }
 
-$taskInProgress = Join-Path $repoRoot "workflows" "default" "systems" "mcp" "tools" "task-mark-in-progress" "script.ps1"
+$taskInProgress = Join-Path $repoRoot "core" "mcp" "tools" "task-mark-in-progress" "script.ps1"
 Assert-PathExists -Name "task-mark-in-progress/script.ps1 exists" -Path $taskInProgress
 if (Test-Path $taskInProgress) {
     Assert-FileContains -Name "task-mark-in-progress imports FrameworkIntegrity module" `
@@ -1442,8 +1445,8 @@ if (Test-Path $initProject) {
         -Path $initProject -Pattern 'UserPaths'
 }
 
-# Manifest module (ships with the default workflow alongside FrameworkIntegrity.psm1)
-$manifestModule = Join-Path $repoRoot "workflows" "default" "systems" "mcp" "modules" "Manifest.psm1"
+# Manifest module (ships in core/ alongside FrameworkIntegrity.psm1)
+$manifestModule = Join-Path $repoRoot "core" "mcp" "modules" "Manifest.psm1"
 Assert-PathExists -Name "Manifest.psm1 module exists" -Path $manifestModule
 Assert-ValidPowerShell -Name "Manifest.psm1 is valid PowerShell" -Path $manifestModule
 if (Test-Path $manifestModule) {
@@ -1483,23 +1486,23 @@ if (Test-Path $workflowInit) {
 # DO NOT MODIFY headers on key framework files
 $headerBannerPattern = 'FRAMEWORK FILE.*DO NOT MODIFY'
 $bannerTargets = @(
-    'workflows\default\go.ps1',
-    'workflows\default\init.ps1',
-    'workflows\default\systems\mcp\dotbot-mcp.ps1',
-    'workflows\default\hooks\verify\00-privacy-scan.ps1',
-    'workflows\default\hooks\verify\01-git-clean.ps1',
-    'workflows\default\hooks\verify\02-git-pushed.ps1',
-    'workflows\default\hooks\verify\03-check-md-refs.ps1',
-    'workflows\default\hooks\verify\04-framework-integrity.ps1',
-    'workflows\default\hooks\scripts\commit-bot-state.ps1',
-    'workflows\default\hooks\scripts\steering.ps1',
-    'workflows\default\hooks\dev\Start-Dev.ps1',
-    'workflows\default\hooks\dev\Stop-Dev.ps1',
-    'workflows\default\workflow.yaml',
-    'workflows\default\recipes\agents\implementer\AGENT.md',
-    'workflows\default\recipes\agents\planner\AGENT.md',
-    'workflows\default\recipes\agents\reviewer\AGENT.md',
-    'workflows\default\recipes\agents\tester\AGENT.md'
+    'workflows/default/go.ps1',
+    'workflows/default/init.ps1',
+    'core/mcp/dotbot-mcp.ps1',
+    'core/hooks/verify/00-privacy-scan.ps1',
+    'core/hooks/verify/01-git-clean.ps1',
+    'core/hooks/verify/02-git-pushed.ps1',
+    'core/hooks/verify/03-check-md-refs.ps1',
+    'core/hooks/verify/04-framework-integrity.ps1',
+    'workflows/default/hooks/scripts/commit-bot-state.ps1',
+    'workflows/default/hooks/scripts/steering.ps1',
+    'workflows/default/hooks/dev/Start-Dev.ps1',
+    'workflows/default/hooks/dev/Stop-Dev.ps1',
+    'workflows/default/workflow.yaml',
+    'core/agents/implementer/AGENT.md',
+    'core/agents/planner/AGENT.md',
+    'core/agents/reviewer/AGENT.md',
+    'core/agents/tester/AGENT.md'
 )
 foreach ($rel in $bannerTargets) {
     $abs = Join-Path $repoRoot $rel
@@ -1530,3 +1533,5 @@ $allPassed = Write-TestSummary -LayerName "Layer 1: Structure"
 if (-not $allPassed) {
     exit 1
 }
+
+

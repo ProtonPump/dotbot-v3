@@ -29,7 +29,7 @@ Write-Host ""
 Reset-TestResults
 
 # Dot-source the module under test
-. (Join-Path $repoRoot "workflows\default\systems\runtime\modules\workflow-manifest.ps1")
+. (Join-Path $repoRoot "core/runtime/modules/workflow-manifest.ps1")
 
 # Check prerequisite: powershell-yaml needed for Read-WorkflowManifest
 $yamlModule = Get-Module -ListAvailable powershell-yaml -ErrorAction SilentlyContinue
@@ -787,10 +787,10 @@ Write-Host "  ──────────────────────
 function Write-Status { param($Message, $Type) }
 function Write-ProcessActivity { param($Id, $ActivityType, $Message) }
 
-. (Join-Path $repoRoot "workflows\default\systems\runtime\modules\post-script-runner.ps1")
+. (Join-Path $repoRoot "core/runtime/modules/post-script-runner.ps1")
 
 $postRoot = Join-Path ([System.IO.Path]::GetTempPath()) "dotbot-post-$([System.Guid]::NewGuid().ToString().Substring(0,8))"
-New-Item -ItemType Directory -Path (Join-Path $postRoot "systems\runtime") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $postRoot "core/runtime") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $postRoot "scripts") -Force | Out-Null
 
 try {
@@ -805,13 +805,13 @@ $sentinel = Join-Path $BotRoot "sentinel\ran.txt"
     Set-Content $sentinel
 exit 0
 '@
-    $okScript | Set-Content (Join-Path $postRoot "systems\runtime\ok-post.ps1")
+    $okScript | Set-Content (Join-Path $postRoot "core/runtime/ok-post.ps1")
 
     $failScript = @'
 param([string]$BotRoot, [string]$ProductDir, $Settings, [string]$Model, [string]$ProcessId)
 exit 7
 '@
-    $failScript | Set-Content (Join-Path $postRoot "systems\runtime\fail-post.ps1")
+    $failScript | Set-Content (Join-Path $postRoot "core/runtime/fail-post.ps1")
 
     $scriptsDirScript = @'
 param([string]$BotRoot, [string]$ProductDir, $Settings, [string]$Model, [string]$ProcessId)
@@ -823,7 +823,7 @@ exit 0
     $settings = @{ foo = "bar" }
     $productDir = Join-Path $postRoot "workspace\product"
 
-    # Happy path: default path resolution (systems/runtime/<name>)
+    # Happy path: default path resolution (core/runtime/<name>)
     $threw = $false
     try {
         Invoke-PostScript -BotRoot $postRoot -ProductDir $productDir `
@@ -905,7 +905,7 @@ Write-Host "  INVOKE-TASKPOSTSCRIPTIFPRESENT" -ForegroundColor Cyan
 Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray
 
 $wrapRoot = Join-Path ([System.IO.Path]::GetTempPath()) "dotbot-wrap-$([System.Guid]::NewGuid().ToString().Substring(0,8))"
-New-Item -ItemType Directory -Path (Join-Path $wrapRoot "systems\runtime") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $wrapRoot "core/runtime") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $wrapRoot "sentinel") -Force | Out-Null
 
 try {
@@ -915,13 +915,13 @@ param([string]$BotRoot, [string]$ProductDir, $Settings, [string]$Model, [string]
 Set-Content (Join-Path $BotRoot "sentinel\wrap-ok.txt") "ran"
 exit 0
 '@
-    $okScript | Set-Content (Join-Path $wrapRoot "systems\runtime\wrap-ok.ps1")
+    $okScript | Set-Content (Join-Path $wrapRoot "core/runtime/wrap-ok.ps1")
 
     $failScript = @'
 param([string]$BotRoot, [string]$ProductDir, $Settings, [string]$Model, [string]$ProcessId)
 exit 3
 '@
-    $failScript | Set-Content (Join-Path $wrapRoot "systems\runtime\wrap-fail.ps1")
+    $failScript | Set-Content (Join-Path $wrapRoot "core/runtime/wrap-fail.ps1")
 
     $settings = @{}
     $productDir = Join-Path $wrapRoot "workspace\product"
@@ -1055,7 +1055,7 @@ Write-Host ""
 Write-Host "  POST_SCRIPT WIRING" -ForegroundColor Cyan
 Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray
 
-$workflowProcessPath = Join-Path $repoRoot "workflows\default\systems\runtime\modules\ProcessTypes\Invoke-WorkflowProcess.ps1"
+$workflowProcessPath = Join-Path $repoRoot "core/runtime/modules/ProcessTypes/Invoke-WorkflowProcess.ps1"
 
 Assert-PathExists -Name "Invoke-WorkflowProcess.ps1 exists" -Path $workflowProcessPath
 
@@ -1197,7 +1197,7 @@ Write-Host "  ──────────────────────
 # is dot-sourced from inside a function/scriptblock scope (the pattern
 # server.ps1 and task-get-next/script.ps1 use). Without -Global the imported
 # function ends up in a module scope that HTTP route handlers cannot reach.
-$workflowManifestPath = Join-Path $repoRoot "workflows\default\systems\runtime\modules\workflow-manifest.ps1"
+$workflowManifestPath = Join-Path $repoRoot "core/runtime/modules/workflow-manifest.ps1"
 $workflowManifestSrc = Get-Content $workflowManifestPath -Raw
 
 Assert-True -Name "Fix#1: workflow-manifest.ps1 Import-Module for ManifestCondition uses -Global" `
@@ -1231,7 +1231,7 @@ Assert-True -Name "Fix#1: Test-ManifestCondition visible after nested dot-source
 $promptFiles = @(
     (Join-Path $repoRoot "workflows\start-from-prompt\recipes\prompts\03b-expand-task-group.md"),
     (Join-Path $repoRoot "workflows\start-from-prompt\recipes\prompts\01b-generate-decisions.md"),
-    (Join-Path $repoRoot "workflows\default\recipes\prompts\98-analyse-task.md")
+    (Join-Path $repoRoot "core/prompts/98-analyse-task.md")
 )
 foreach ($pf in $promptFiles) {
     $relName = Split-Path $pf -Leaf
@@ -1258,15 +1258,18 @@ Assert-True -Name "Fix#4: 01b-generate-decisions.md still reads mission/tech-sta
 # pushed immediately instead of leaving the agent stuck on the
 # 02-git-pushed.ps1 gate at task_mark_done time.
 $autonomousTaskPrompts = @(
-    (Join-Path $repoRoot "workflows\default\recipes\prompts\99-autonomous-task.md"),
-    (Join-Path $repoRoot "workflows\start-from-jira\recipes\prompts\99-autonomous-task.md")
+    (Join-Path $repoRoot "core/prompts/99-autonomous-task.md"),
+    (Join-Path $repoRoot "workflows/start-from-jira/recipes/prompts/99-autonomous-task.md")
 )
 foreach ($pf in $autonomousTaskPrompts) {
     $relName = Split-Path $pf -Leaf
-    # Walk up 3 parents to reach the workflow directory (e.g. "workflows/default")
-    # then take its leaf to get the workflow name ("default", "start-from-jira").
-    # Path structure: workflows/<workflow>/recipes/prompts/<file>.md.
-    $parentDir = Split-Path (Split-Path (Split-Path (Split-Path $pf -Parent) -Parent) -Parent) -Leaf
+    # Label the prompt by its top-level source — "core" for the framework copy,
+    # the workflow name for workflow-scoped overrides.
+    $parentDir = if ($pf -match '[/\\]core[/\\]prompts[/\\]') {
+        'core'
+    } else {
+        Split-Path (Split-Path (Split-Path (Split-Path $pf -Parent) -Parent) -Parent) -Leaf
+    }
     Assert-PathExists -Name "Fix#A: $parentDir/$relName exists" -Path $pf
     $src = Get-Content $pf -Raw
     Assert-True -Name "Fix#A: $parentDir/$relName has branch-conditional task/ guard" `
@@ -1315,7 +1318,7 @@ Assert-True -Name "Fix#B: 03b tells agent not to relax constraints during expans
 # reads against the current task's outputs list, so tasks that produce those
 # files (e.g. kickstart Product Documents) do not error during pre-flight
 # analysis trying to read files they are supposed to create.
-$analyseTaskPath = Join-Path $repoRoot "workflows\default\recipes\prompts\98-analyse-task.md"
+$analyseTaskPath = Join-Path $repoRoot "core/prompts/98-analyse-task.md"
 Assert-PathExists -Name "Fix#C: 98-analyse-task.md exists" -Path $analyseTaskPath
 $analyseTaskSrc = Get-Content $analyseTaskPath -Raw
 Assert-True -Name "Fix#C: 98-analyse-task.md has skip-if-produced guard in Phase 2" `
@@ -1360,3 +1363,4 @@ $allPassed = Write-TestSummary -LayerName "Layer 1: Workflow Manifest"
 if (-not $allPassed) {
     exit 1
 }
+
